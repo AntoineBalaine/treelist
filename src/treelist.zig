@@ -75,9 +75,6 @@ pub fn TreeList(comptime node_types: anytype) type {
         });
     };
 
-    // Create a NodeUnion type for type-safe node access
-
-    // Create the NodeUnion type for returning to users
     const TypeUnion = blk: {
         var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
         inline for (node_types, 0..) |T, i| {
@@ -102,14 +99,14 @@ pub fn TreeList(comptime node_types: anytype) type {
         pub const NodeUnion = TypeUnion;
         const MAX_TREE_HEIGHT = 128;
 
-        // Storage for each node type
+        /// Storage for each node type
         storage: Storage = undefined,
-        // String pool for interning strings
+        /// String pool for interning strings
         string_pool: StringPool = .empty,
-        // Map from string refs to root nodes
+        /// Map from string refs to root nodes
         roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TableEnum)) = .{},
 
-        // Iterator for traversing the tree without allocations
+        /// Iterator for traversing the tree without allocations
         pub const Iterator = struct {
             tree_list: *Self,
             current: ?Loc,
@@ -117,7 +114,7 @@ pub fn TreeList(comptime node_types: anytype) type {
             stack: [MAX_TREE_HEIGHT]Loc = undefined,
             stack_len: usize = 0,
 
-            // Create a new iterator starting at a given root
+            /// Create a new iterator starting at a given root
             pub fn init(tree_list: *Self, root: Loc) Iterator {
                 return .{
                     .tree_list = tree_list,
@@ -152,7 +149,7 @@ pub fn TreeList(comptime node_types: anytype) type {
                 return node;
             }
 
-            // Helper to move to the next node in depth-first order (child first)
+            /// Helper to move to the next node in depth-first order (child first)
             fn moveToNext(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
 
                 // If this node has a child, go there next
@@ -180,7 +177,7 @@ pub fn TreeList(comptime node_types: anytype) type {
                 self.backtrackToNextBranch();
             }
 
-            // Backtrack up the tree until we find a node with an unused sibling
+            /// Backtrack up the tree until we find a node with an unused sibling
             fn backtrackToNextBranch(self: *Iterator) void {
                 while (self.stack_len > 0) {
                     self.stack_len -= 1;
@@ -205,7 +202,7 @@ pub fn TreeList(comptime node_types: anytype) type {
                 self.current = null;
             }
 
-            // Helper to move to the next node in sibling-first order (breadth-like)
+            /// Helper to move to the next node in sibling-first order (breadth-like)
             fn moveToNextSiblingFirst(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
                 // If this node has a sibling, go there first
                 if (switch (current_node) {
@@ -232,7 +229,7 @@ pub fn TreeList(comptime node_types: anytype) type {
                 self.backtrackToNextChild();
             }
 
-            // Backtrack up the tree until we find a node with an unused child
+            /// Backtrack up the tree until we find a node with an unused child
             fn backtrackToNextChild(self: *Iterator) void {
                 while (self.stack_len > 0) {
                     self.stack_len -= 1;
@@ -280,7 +277,7 @@ pub fn TreeList(comptime node_types: anytype) type {
             self.roots.deinit(allocator);
         }
 
-        // Create a new node of a specific type
+        /// Create a new node of a specific type
         pub fn createNode(self: *Self, comptime T: type, allocator: std.mem.Allocator) !Location(TableEnum) {
             // Find the enum value for this type
             const table_value = @field(TableEnum, @typeName(T));
@@ -301,7 +298,7 @@ pub fn TreeList(comptime node_types: anytype) type {
             };
         }
 
-        // Get a node as a tagged union for type-safe access
+        /// Get a node as a tagged union for type-safe access
         pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
             inline for (node_types) |T| {
                 if (loc.table == @field(TableEnum, @typeName(T))) {
@@ -315,7 +312,7 @@ pub fn TreeList(comptime node_types: anytype) type {
             return null;
         }
 
-        // Get a typed pointer to a node
+        /// Get a typed pointer to a node
         pub fn getNodeAs(self: *Self, comptime T: type, loc: Location(TableEnum)) ?*T {
             if (loc.table != @field(TableEnum, @typeName(T))) return null;
 
@@ -325,13 +322,13 @@ pub fn TreeList(comptime node_types: anytype) type {
             return &list.items[loc.idx];
         }
 
-        // Add a root node with a name
+        /// Add a root node with a name
         pub fn addRoot(self: *Self, name: []const u8, loc: Location(TableEnum), allocator: std.mem.Allocator) !void {
             const name_ref = try self.string_pool.add(allocator, name);
             try self.roots.put(allocator, name_ref, loc);
         }
 
-        // Get a root node by name
+        /// Get a root node by name
         pub fn getRoot(self: *Self, name: []const u8) ?Location(TableEnum) {
             // Try to find the string in the pool without adding it
             const adapter = StringPool.TableIndexAdapter{ .bytes = self.string_pool.bytes.items };
@@ -379,12 +376,12 @@ pub fn TreeList(comptime node_types: anytype) type {
             }
         }
 
-        // Create an iterator for traversing the tree
+        /// Create an iterator for traversing the tree
         pub fn iterator(self: *Self, root: Loc) Iterator {
             return Iterator.init(self, root);
         }
 
-        // Create an iterator from a named root
+        /// Create an iterator from a named root
         pub fn iteratorFromRoot(self: *Self, name: []const u8) ?Iterator {
             const root_loc = self.getRoot(name) orelse return null;
             return Iterator.init(self, root_loc);
