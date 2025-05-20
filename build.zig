@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
 
     // Add a specific test for treelist.zig
     const treelist_tests = b.addTest(.{
-        .root_source_file = b.path("src/treelist.zig"),
+        .root_source_file = b.path("src/treelist_test.zig"),
         .target = target,
         .optimize = optimize,
     });
