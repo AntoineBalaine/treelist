@@ -100,7 +100,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         const Self = @This();
         pub const Loc = Location(TableEnum);
         pub const NodeUnion = TypeUnion;
-        const MAX_TREE_HEIGHT = 64; // Maximum tree height for fixed-size stack
+        const MAX_TREE_HEIGHT = 128;
 
         // Storage for each node type
         storage: Storage = undefined,
@@ -126,7 +126,7 @@ pub fn TreeList(comptime node_types: anytype) type {
                 };
             }
 
-            // Get the next node in the traversal
+            /// Get the next node in depth-first traversal (child first, then sibling)
             pub fn next(self: *Iterator) ?NodeUnion {
                 const current = self.current orelse return null;
 
@@ -139,7 +139,20 @@ pub fn TreeList(comptime node_types: anytype) type {
                 return node;
             }
 
-            // Helper to move to the next node in traversal order
+            /// Get the next node in sibling-first traversal (breadth-like)
+            pub fn nextSiblingFirst(self: *Iterator) ?NodeUnion {
+                const current = self.current orelse return null;
+
+                // Get the current node
+                const node = self.tree_list.getNode(current) orelse return null;
+
+                // Prepare to move to the next node (sibling first)
+                self.moveToNextSiblingFirst(current, node);
+
+                return node;
+            }
+
+            // Helper to move to the next node in depth-first order (child first)
             fn moveToNext(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
 
                 // If this node has a child, go there next
@@ -186,6 +199,58 @@ pub fn TreeList(comptime node_types: anytype) type {
                         }
                     }
                     // Continue backtracking if this parent has no sibling
+                }
+
+                // If we've exhausted all nodes, mark as done
+                self.current = null;
+            }
+
+            // Helper to move to the next node in sibling-first order (breadth-like)
+            fn moveToNextSiblingFirst(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
+                // If this node has a sibling, go there first
+                if (switch (current_node) {
+                    inline else => |*data| data.sibling,
+                }) |sibling| {
+                    self.current = sibling;
+                    return;
+                }
+
+                // If no sibling but has a child, go to child
+                if (switch (current_node) {
+                    inline else => |*data| data.child,
+                }) |child| {
+                    // Save current location for backtracking
+                    if (self.stack_len < self.stack.len) {
+                        self.stack[self.stack_len] = current_loc;
+                        self.stack_len += 1;
+                    }
+                    self.current = child;
+                    return;
+                }
+
+                // Otherwise, backtrack and look for a child of an ancestor
+                self.backtrackToNextChild();
+            }
+
+            // Backtrack up the tree until we find a node with an unused child
+            fn backtrackToNextChild(self: *Iterator) void {
+                while (self.stack_len > 0) {
+                    self.stack_len -= 1;
+                    const parent_loc = self.stack[self.stack_len];
+
+                    // Get the parent node
+                    if (self.tree_list.getNode(parent_loc)) |parent| {
+                        // Get parent's child
+                        const parent_child_opt = switch (parent) {
+                            inline else => |*data| data.child,
+                        };
+
+                        if (parent_child_opt) |parent_child| {
+                            self.current = parent_child;
+                            return;
+                        }
+                    }
+                    // Continue backtracking if this parent has no child
                 }
 
                 // If we've exhausted all nodes, mark as done
