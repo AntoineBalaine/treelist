@@ -331,20 +331,17 @@ pub fn TreeList(comptime node_types: anytype) type {
             self.roots.deinit(allocator);
         }
 
-        /// Create a new node of a specific type
-        pub fn createNode(self: *Self, comptime T: type, allocator: std.mem.Allocator) !Location(TableEnum) {
+        /// Append a node value to the tree list
+        pub fn append(self: *Self, comptime T: type, value: T, allocator: std.mem.Allocator) !Location(TableEnum) {
             // Find the enum value for this type
             const table_value = @field(TableEnum, @typeName(T));
 
             // Get the array list for this type
             var list = &@field(self.storage, @typeName(T));
 
-            // Add a new node
+            // Add the node with the provided value
             const idx = list.items.len;
-            try list.append(allocator, .{
-                .child = null,
-                .sibling = null,
-            });
+            try list.append(allocator, value);
 
             return Location(TableEnum){
                 .table = table_value,
@@ -443,4 +440,154 @@ pub fn TreeList(comptime node_types: anytype) type {
 }
 
 const std = @import("std");
-const StringPool = @import("../string_interning.zig");
+const StringPool = @import("string_interning.zig");
+
+test "Insert and retrieve root node" {
+    // Define test types
+    const IntNode = struct {
+        value: i32,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const FloatNode = struct {
+        value: f64,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const StrNode = struct {
+        value: []const u8,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    // Create TreeList instance
+    var tree = TreeList(.{
+        IntNode,
+        FloatNode,
+        StrNode,
+    }).empty;
+    try tree.init();
+    defer tree.deinit(std.testing.allocator);
+
+    // Create and add a root node
+    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    try tree.addRoot("root", int_loc, std.testing.allocator);
+
+    // Retrieve the root node
+    const root_loc = tree.getRoot("root") orelse return std.testing.expect(false);
+    const root_node = tree.getNodeAs(IntNode, root_loc).?;
+
+    try std.testing.expectEqual(@as(i32, 42), root_node.value);
+}
+
+test "Insert and retrieve root and child nodes" {
+    // Define test types
+    const IntNode = struct {
+        value: i32,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const FloatNode = struct {
+        value: f64,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const StrNode = struct {
+        value: []const u8,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    // Create TreeList instance
+    var tree = TreeList(.{
+        IntNode,
+        FloatNode,
+        StrNode,
+    }).empty;
+    try tree.init();
+    defer tree.deinit(std.testing.allocator);
+
+    // Create and add a root node
+    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    try tree.addRoot("root", int_loc, std.testing.allocator);
+
+    // Create and add a child node
+    const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
+    try tree.addChild(int_loc, float_loc);
+
+    // Retrieve the root node
+    const root_loc = tree.getRoot("root") orelse return std.testing.expect(false);
+    const root_node = tree.getNodeAs(IntNode, root_loc).?;
+    try std.testing.expectEqual(@as(i32, 42), root_node.value);
+
+    // Get the child node by traversing from root
+    const child_u64 = root_node.child orelse return std.testing.expect(false);
+    const child_loc = Location(tree.Loc.TableEnum).fromU64(child_u64);
+
+    // Verify child is a float node with correct value
+    const child_node = tree.getNodeAs(FloatNode, child_loc).?;
+    try std.testing.expectApproxEqAbs(@as(f64, 3.14), child_node.value, 0.001);
+}
+
+test "Insert and retrieve root, child, and sibling nodes" {
+    // Define test types
+    const IntNode = struct {
+        value: i32,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const FloatNode = struct {
+        value: f64,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    const StrNode = struct {
+        value: []const u8,
+        child: ?u64 = null,
+        sibling: ?u64 = null,
+    };
+
+    // Create TreeList instance
+    var tree = TreeList(.{
+        IntNode,
+        FloatNode,
+        StrNode,
+    }).empty;
+    try tree.init();
+    defer tree.deinit(std.testing.allocator);
+
+    // Create and add a root node (Int)
+    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    try tree.addRoot("root", int_loc, std.testing.allocator);
+
+    // Create and add first child node (Float)
+    const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
+    try tree.addChild(int_loc, float_loc);
+
+    // Create and add second child node (Str) - becomes sibling of first child
+    const str_loc = try tree.append(StrNode, .{ .value = "hello" }, std.testing.allocator);
+    try tree.addChild(int_loc, str_loc);
+
+    // Retrieve the root node
+    const root_loc = tree.getRoot("root") orelse return std.testing.expect(false);
+    const root_node = tree.getNodeAs(IntNode, root_loc).?;
+    try std.testing.expectEqual(@as(i32, 42), root_node.value);
+
+    // Get the first child (should be Str since it was added second)
+    const first_child_u64 = root_node.child orelse return std.testing.expect(false);
+    const first_child_loc = Location(tree.Loc.TableEnum).fromU64(first_child_u64);
+    const first_child = tree.getNodeAs(StrNode, first_child_loc).?;
+    try std.testing.expectEqualStrings("hello", first_child.value);
+
+    // Get the sibling (should be Float)
+    const sibling_u64 = first_child.sibling orelse return std.testing.expect(false);
+    const sibling_loc = Location(tree.Loc.TableEnum).fromU64(sibling_u64);
+    const sibling = tree.getNodeAs(FloatNode, sibling_loc).?;
+    try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.value, 0.001);
+}
