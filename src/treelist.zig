@@ -75,8 +75,31 @@ pub fn TreeList(comptime node_types: anytype) type {
         });
     };
 
+    // Create a NodeUnion type for type-safe node access
+
+    // Create the NodeUnion type for returning to users
+    const NodeUnion = blk: {
+        var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
+        inline for (node_types, 0..) |T, i| {
+            union_fields[i] = .{
+                .name = @typeName(T),
+                .type = T,
+                .alignment = @alignOf(T),
+            };
+        }
+        break :blk @Type(.{
+            .Union = .{
+                .layout = .auto,
+                .tag_type = TableEnum,
+                .fields = &union_fields,
+                .decls = &[_]std.builtin.Type.Declaration{},
+            },
+        });
+    };
     return struct {
         const Self = @This();
+        pub const Loc = Location(TableEnum);
+        pub const NodeUnion = NodeUnion;
 
         // Storage for each node type
         storage: Storage = undefined,
@@ -130,13 +153,15 @@ pub fn TreeList(comptime node_types: anytype) type {
             };
         }
 
-        // Get a pointer to a node from a location
-        pub fn getNode(self: *Self, loc: Location(TableEnum)) ?*anyopaque {
+        // Get a node as a tagged union for type-safe access
+        pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
             inline for (node_types) |T| {
                 if (loc.table == @field(TableEnum, @typeName(T))) {
                     var list = &@field(self.storage, @typeName(T));
                     if (loc.idx >= list.items.len) return null;
-                    return &list.items[loc.idx];
+                    
+                    // Create and return the union directly
+                    return @unionInit(NodeUnion, @typeName(T), list.items[loc.idx]);
                 }
             }
             return null;
@@ -232,18 +257,26 @@ pub fn TreeList(comptime node_types: anytype) type {
                 }
 
                 // Get current node
-                const node_ptr = self.getNode(current).?;
+                const node = self.getNode(current).?;
+                
+                // Get child and sibling locations from the union
+                const child = switch (node) {
+                    inline else => |*data| data.child,
+                };
+                const sibling = switch (node) {
+                    inline else => |*data| data.sibling,
+                };
 
                 // If there's a child, go there next
-                if (node_ptr.child) |child| {
+                if (child) |child_loc| {
                     // Save current location for later
                     try self.traversal_stack.append(allocator, current);
-                    current = child;
+                    current = child_loc;
                     current_depth += 1;
                 }
                 // Otherwise, try to go to sibling
-                else if (node_ptr.sibling) |sibling| {
-                    current = sibling;
+                else if (sibling) |sibling_loc| {
+                    current = sibling_loc;
                     // Depth stays the same for siblings
                 }
                 // No child or sibling, go back up
@@ -253,7 +286,11 @@ pub fn TreeList(comptime node_types: anytype) type {
 
                     // Try to go to sibling of this node
                     const parent_node = self.getNode(current).?;
-                    if (parent_node.sibling) |sibling| {
+                    const parent_sibling = switch (parent_node) {
+                        inline else => |*data| data.sibling,
+                    };
+                    
+                    if (parent_sibling) |sibling| {
                         current = sibling;
                     }
                 }
@@ -274,26 +311,39 @@ pub fn TreeList(comptime node_types: anytype) type {
 
             while (true) {
                 // Visit current node
-                const node_ptr = self.getNode(current) orelse return error.InvalidNode;
-                try visitor.visit(node_ptr);
+                const node = self.getNode(current) orelse return error.InvalidNode;
+                try visitor.visit(node);
+
+                // Get child and sibling locations from the union
+                const child = switch (node) {
+                    inline else => |*data| data.child,
+                };
+                const sibling = switch (node) {
+                    inline else => |*data| data.sibling,
+                };
 
                 // If there's a child, go there next
-                if (node_ptr.child) |child| {
+                if (child) |child_loc| {
                     // Save current location for later
                     try self.traversal_stack.append(allocator, current);
-                    current = child;
+                    current = child_loc;
                 }
                 // Otherwise, try to go to sibling
-                else if (node_ptr.sibling) |sibling| {
-                    current = sibling;
+                else if (sibling) |sibling_loc| {
+                    current = sibling_loc;
                 }
                 // No child or sibling, go back up to parent's sibling if possible
                 else if (self.traversal_stack.items.len > 0) {
                     const parent = self.traversal_stack.pop();
                     const parent_node = self.getNode(parent) orelse return error.InvalidNode;
 
+                    // Get the parent's sibling from the union
+                    const parent_sibling = switch (parent_node) {
+                        inline else => |*data| data.sibling,
+                    };
+
                     // If parent has a sibling, go there
-                    if (parent_node.sibling) |sibling| {
+                    if (parent_sibling) |sibling| {
                         current = sibling;
                     }
                     // Otherwise, keep going up
@@ -303,8 +353,13 @@ pub fn TreeList(comptime node_types: anytype) type {
                         while (self.traversal_stack.items.len > 0) {
                             const ancestor = self.traversal_stack.pop();
                             const ancestor_node = self.getNode(ancestor) orelse return error.InvalidNode;
+                            
+                            // Get the ancestor's sibling from the union
+                            const ancestor_sibling = switch (ancestor_node) {
+                                inline else => |*data| data.sibling,
+                            };
 
-                            if (ancestor_node.sibling) |sibling| {
+                            if (ancestor_sibling) |sibling| {
                                 current = sibling;
                                 found_next = true;
                                 break;
