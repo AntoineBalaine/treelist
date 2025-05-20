@@ -108,8 +108,6 @@ pub fn TreeList(comptime node_types: anytype) type {
         string_pool: StringPool = .empty,
         // Map from string refs to root nodes
         roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TableEnum)) = .{},
-        traversal_stack: std.ArrayListUnmanaged(Location(TableEnum)) = .{},
-        max_tree_height: usize = 0,
 
         // Iterator for traversing the tree without allocations
         pub const Iterator = struct {
@@ -288,8 +286,6 @@ pub fn TreeList(comptime node_types: anytype) type {
             self: *Self,
             parent_loc: Location(TableEnum),
             child_loc: Location(TableEnum),
-            root_loc: Location(TableEnum),
-            allocator: std.mem.Allocator,
         ) !void {
             // Get parent node
             const parent = self.getNode(parent_loc) orelse return error.InvalidParent;
@@ -313,149 +309,6 @@ pub fn TreeList(comptime node_types: anytype) type {
                             break;
                         }
                     }
-                    break;
-                }
-            }
-
-            // Simple height check - measure this tree's height
-            const height = try self.getTreeHeight(root_loc, allocator);
-
-            // Update max height if needed
-            if (height > self.max_tree_height) {
-                self.max_tree_height = height;
-                try self.traversal_stack.ensureTotalCapacity(allocator, self.max_tree_height + 1);
-            }
-        }
-
-        fn getTreeHeight(self: *Self, root: Location(TableEnum), allocator: std.mem.Allocator) !usize {
-            // Clear the stack without deallocating
-            self.traversal_stack.clearRetainingCapacity();
-
-            var max_depth: usize = 0;
-            var current_depth: usize = 0;
-            var current = root;
-
-            while (true) {
-                // Update max depth
-                if (current_depth > max_depth) {
-                    max_depth = current_depth;
-                }
-
-                // Get current node
-                const node = self.getNode(current).?;
-
-                // Get child and sibling locations from the union
-
-                // If there's a child, go there next
-                if (switch (node) {
-                    inline else => |*data| data.child,
-                }) |child_loc| {
-                    // Save current location for later
-                    try self.traversal_stack.append(allocator, current);
-                    current = child_loc;
-                    current_depth += 1;
-                }
-                // Otherwise, try to go to sibling
-                else if (switch (node) {
-                    inline else => |*data| data.sibling,
-                }) |sibling_loc| {
-                    current = sibling_loc;
-                    // Depth stays the same for siblings
-                }
-                // No child or sibling, go back up
-                else if (self.traversal_stack.items.len > 0) {
-                    current = self.traversal_stack.pop();
-                    current_depth -= 1;
-
-                    // Try to go to sibling of this node
-                    const parent_node = self.getNode(current).?;
-                    const parent_sibling = switch (parent_node) {
-                        inline else => |*data| data.sibling,
-                    };
-
-                    if (parent_sibling) |sibling| {
-                        current = sibling;
-                    }
-                }
-                // No more nodes to visit
-                else {
-                    break;
-                }
-            }
-
-            return max_depth;
-        }
-
-        pub fn traverse(self: *Self, root: Location(TableEnum), visitor: anytype, allocator: std.mem.Allocator) !void {
-            // Clear the stack without deallocating
-            self.traversal_stack.clearRetainingCapacity();
-
-            var current = root;
-
-            while (true) {
-                // Visit current node
-                const node = self.getNode(current) orelse return error.InvalidNode;
-                try visitor.visit(node);
-
-                // Get child and sibling locations from the union
-                const child = switch (node) {
-                    inline else => |*data| data.child,
-                };
-
-                // If there's a child, go there next
-                if (child) |child_loc| {
-                    // Save current location for later
-                    try self.traversal_stack.append(allocator, current);
-                    current = child_loc;
-                }
-                // Otherwise, try to go to sibling
-                else if (switch (node) {
-                    inline else => |*data| data.sibling,
-                }) |sibling_loc| {
-                    current = sibling_loc;
-                }
-                // No child or sibling, go back up to parent's sibling if possible
-                else if (self.traversal_stack.items.len > 0) {
-                    const parent = self.traversal_stack.pop();
-                    const parent_node = self.getNode(parent) orelse return error.InvalidNode;
-
-                    // Get the parent's sibling from the union
-                    const parent_sibling = switch (parent_node) {
-                        inline else => |*data| data.sibling,
-                    };
-
-                    // If parent has a sibling, go there
-                    if (parent_sibling) |sibling| {
-                        current = sibling;
-                    }
-                    // Otherwise, keep going up
-                    else {
-                        // Continue popping until we find a node with a sibling
-                        var found_next = false;
-                        while (self.traversal_stack.items.len > 0) {
-                            const ancestor = self.traversal_stack.pop();
-                            const ancestor_node = self.getNode(ancestor) orelse return error.InvalidNode;
-
-                            // Get the ancestor's sibling from the union
-                            const ancestor_sibling = switch (ancestor_node) {
-                                inline else => |*data| data.sibling,
-                            };
-
-                            if (ancestor_sibling) |sibling| {
-                                current = sibling;
-                                found_next = true;
-                                break;
-                            }
-                        }
-
-                        // If we've exhausted the stack and found no more siblings, we're done
-                        if (!found_next) {
-                            break;
-                        }
-                    }
-                }
-                // No more nodes to visit
-                else {
                     break;
                 }
             }
