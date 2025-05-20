@@ -118,10 +118,31 @@ pub fn TreeList(comptime node_types: anytype) type {
             },
         });
     };
+
+    // Create union type for node pointers
+    const NodePtrUnion = blk: {
+        var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
+        inline for (node_types, 0..) |T, i| {
+            union_fields[i] = .{
+                .name = @typeName(T) ++ "Ptr",
+                .type = *T,
+                .alignment = @alignOf(*T),
+            };
+        }
+        break :blk @Type(.{
+            .Union = .{
+                .layout = .auto,
+                .tag_type = TableEnum,
+                .fields = &union_fields,
+                .decls = &[_]std.builtin.Type.Declaration{},
+            },
+        });
+    };
     return struct {
         const Self = @This();
         pub const Loc = Location(TableEnum);
         pub const NodeUnion = TypeUnion;
+        pub const PtrUnion = NodePtrUnion;
         const MAX_TREE_HEIGHT = 128;
 
         /// Storage for each node type
@@ -149,37 +170,37 @@ pub fn TreeList(comptime node_types: anytype) type {
             }
 
             /// Get the next node in depth-first traversal (child first, then sibling)
-            pub fn next(self: *Iterator) ?NodeUnion {
+            pub fn next(self: *Iterator) ?PtrUnion {
                 const current = self.current orelse return null;
 
-                // Get the current node
-                const node = self.tree_list.getNode(current) orelse return null;
+                // Get the current node pointer
+                const node_ptr = self.tree_list.getNodePtr(current) orelse return null;
 
                 // Prepare to move to the next node
-                self.moveToNext(current, node);
+                self.moveToNext(current, node_ptr);
 
-                return node;
+                return node_ptr;
             }
 
             /// Get the next node in sibling-first traversal (breadth-like)
-            pub fn nextSiblingFirst(self: *Iterator) ?NodeUnion {
+            pub fn nextSiblingFirst(self: *Iterator) ?PtrUnion {
                 const current = self.current orelse return null;
 
-                // Get the current node
-                const node = self.tree_list.getNode(current) orelse return null;
+                // Get the current node pointer
+                const node_ptr = self.tree_list.getNodePtr(current) orelse return null;
 
                 // Prepare to move to the next node (sibling first)
-                self.moveToNextSiblingFirst(current, node);
+                self.moveToNextSiblingFirst(current, node_ptr);
 
-                return node;
+                return node_ptr;
             }
 
             /// Helper to move to the next node in depth-first order (child first)
-            fn moveToNext(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
+            fn moveToNext(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
 
                 // If this node has a child, go there next
                 if (switch (current_node) {
-                    inline else => |*data| data.child,
+                    inline else => |ptr| ptr.child,
                 }) |child_u64| {
                     const child = Loc.fromU64(child_u64);
 
@@ -194,7 +215,7 @@ pub fn TreeList(comptime node_types: anytype) type {
 
                 // If this node has a sibling, go there next
                 if (switch (current_node) {
-                    inline else => |*data| data.sibling,
+                    inline else => |ptr| ptr.sibling,
                 }) |sibling_u64| {
                     const sibling = Loc.fromU64(sibling_u64);
                     self.current = sibling;
@@ -211,11 +232,11 @@ pub fn TreeList(comptime node_types: anytype) type {
                     self.stack_len -= 1;
                     const parent_loc = self.stack[self.stack_len];
 
-                    // Get the parent node
-                    if (self.tree_list.getNode(parent_loc)) |parent| {
+                    // Get the parent node pointer
+                    if (self.tree_list.getNodePtr(parent_loc)) |parent_ptr| {
                         // Get parent's sibling
-                        const parent_sibling_opt = switch (parent) {
-                            inline else => |*data| data.sibling,
+                        const parent_sibling_opt = switch (parent_ptr) {
+                            inline else => |ptr| ptr.sibling,
                         };
 
                         if (parent_sibling_opt) |parent_sibling_u64| {
@@ -232,10 +253,10 @@ pub fn TreeList(comptime node_types: anytype) type {
             }
 
             /// Helper to move to the next node in sibling-first order (breadth-like)
-            fn moveToNextSiblingFirst(self: *Iterator, current_loc: Loc, current_node: NodeUnion) void {
+            fn moveToNextSiblingFirst(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
                 // If this node has a sibling, go there first
                 if (switch (current_node) {
-                    inline else => |*data| data.sibling,
+                    inline else => |ptr| ptr.sibling,
                 }) |sibling_u64| {
                     const sibling = Loc.fromU64(sibling_u64);
                     self.current = sibling;
@@ -244,7 +265,7 @@ pub fn TreeList(comptime node_types: anytype) type {
 
                 // If no sibling but has a child, go to child
                 if (switch (current_node) {
-                    inline else => |*data| data.child,
+                    inline else => |ptr| ptr.child,
                 }) |child_u64| {
                     const child = Loc.fromU64(child_u64);
 
@@ -267,11 +288,11 @@ pub fn TreeList(comptime node_types: anytype) type {
                     self.stack_len -= 1;
                     const parent_loc = self.stack[self.stack_len];
 
-                    // Get the parent node
-                    if (self.tree_list.getNode(parent_loc)) |parent| {
+                    // Get the parent node pointer
+                    if (self.tree_list.getNodePtr(parent_loc)) |parent_ptr| {
                         // Get parent's child
-                        const parent_child_opt = switch (parent) {
-                            inline else => |*data| data.child,
+                        const parent_child_opt = switch (parent_ptr) {
+                            inline else => |ptr| ptr.child,
                         };
 
                         if (parent_child_opt) |parent_child_u64| {
@@ -396,6 +417,21 @@ pub fn TreeList(comptime node_types: anytype) type {
         /// Create an iterator for traversing the tree
         pub fn iterator(self: *Self, root: Loc) Iterator {
             return Iterator.init(self, root);
+        }
+
+        /// Get a typed pointer to a node as a union of pointers
+        /// This provides direct access for modifying node properties with full type safety
+        pub fn getNodePtr(self: *Self, loc: Loc) ?PtrUnion {
+            inline for (node_types) |T| {
+                if (loc.table == @field(TableEnum, @typeName(T))) {
+                    var list = &@field(self.storage, @typeName(T));
+                    if (loc.idx >= list.items.len) return null;
+
+                    // Create and return the pointer union
+                    return @unionInit(PtrUnion, @typeName(T) ++ "Ptr", &list.items[loc.idx]);
+                }
+            }
+            return null;
         }
 
         /// Create an iterator from a named root
