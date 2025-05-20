@@ -50,6 +50,31 @@ pub fn TreeList(comptime node_types: anytype) type {
         });
     };
 
+    // Validate that all node types have the required fields
+    inline for (node_types) |T| {
+        // Check for child field with the right type
+        if (!@hasField(T, "child")) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'child' field");
+        }
+
+        // Check for sibling field with the right type
+        if (!@hasField(T, "sibling")) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'sibling' field");
+        }
+
+        // Check field types - must be optional locations
+        const ChildType = @TypeOf(@field(@as(T, undefined), "child"));
+        const SiblingType = @TypeOf(@field(@as(T, undefined), "sibling"));
+
+        if (ChildType != ?u64) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' has 'child' field of invalid type. Expected ?u64, got " ++ @typeName(ChildType));
+        }
+
+        if (SiblingType != ?u64) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' has 'sibling' field of invalid type. Expected ?u64, got " ++ @typeName(SiblingType));
+        }
+    }
+
     // Create the Storage struct type with an ArrayList field for each node type
     const Storage = blk: {
         var fields: [node_types.len]std.builtin.Type.StructField = undefined;
@@ -155,7 +180,9 @@ pub fn TreeList(comptime node_types: anytype) type {
                 // If this node has a child, go there next
                 if (switch (current_node) {
                     inline else => |*data| data.child,
-                }) |child| {
+                }) |child_u64| {
+                    const child = Loc.fromU64(child_u64);
+
                     // Save current location for backtracking
                     if (self.stack_len < self.stack.len) {
                         self.stack[self.stack_len] = current_loc;
@@ -168,7 +195,8 @@ pub fn TreeList(comptime node_types: anytype) type {
                 // If this node has a sibling, go there next
                 if (switch (current_node) {
                     inline else => |*data| data.sibling,
-                }) |sibling| {
+                }) |sibling_u64| {
+                    const sibling = Loc.fromU64(sibling_u64);
                     self.current = sibling;
                     return;
                 }
@@ -190,7 +218,8 @@ pub fn TreeList(comptime node_types: anytype) type {
                             inline else => |*data| data.sibling,
                         };
 
-                        if (parent_sibling_opt) |parent_sibling| {
+                        if (parent_sibling_opt) |parent_sibling_u64| {
+                            const parent_sibling = Loc.fromU64(parent_sibling_u64);
                             self.current = parent_sibling;
                             return;
                         }
@@ -207,7 +236,8 @@ pub fn TreeList(comptime node_types: anytype) type {
                 // If this node has a sibling, go there first
                 if (switch (current_node) {
                     inline else => |*data| data.sibling,
-                }) |sibling| {
+                }) |sibling_u64| {
+                    const sibling = Loc.fromU64(sibling_u64);
                     self.current = sibling;
                     return;
                 }
@@ -215,7 +245,9 @@ pub fn TreeList(comptime node_types: anytype) type {
                 // If no sibling but has a child, go to child
                 if (switch (current_node) {
                     inline else => |*data| data.child,
-                }) |child| {
+                }) |child_u64| {
+                    const child = Loc.fromU64(child_u64);
+
                     // Save current location for backtracking
                     if (self.stack_len < self.stack.len) {
                         self.stack[self.stack_len] = current_loc;
@@ -242,7 +274,8 @@ pub fn TreeList(comptime node_types: anytype) type {
                             inline else => |*data| data.child,
                         };
 
-                        if (parent_child_opt) |parent_child| {
+                        if (parent_child_opt) |parent_child_u64| {
+                            const parent_child = Loc.fromU64(parent_child_u64);
                             self.current = parent_child;
                             return;
                         }
@@ -342,37 +375,21 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Add a child to a parent node
-        /// Allocator is only passed for measuring the max_height_tree in the treelist:
-        /// if the max height changes, the traversal stack needs to be expanded
         pub fn addChild(
             self: *Self,
             parent_loc: Location(TableEnum),
             child_loc: Location(TableEnum),
         ) !void {
             // Get parent node
-            const parent = self.getNode(parent_loc) orelse return error.InvalidParent;
-            _ = parent;
-
-            // Set the child's sibling to the parent's current first child
-            inline for (node_types) |ChildT| {
-                if (child_loc.table == @field(TableEnum, @typeName(ChildT))) {
-                    var child_list = &@field(self.storage, @typeName(ChildT));
-                    var child = &child_list.items[child_loc.idx];
-
-                    // Set the child's sibling to the parent's current first child
-                    inline for (node_types) |ParentT| {
-                        if (parent_loc.table == @field(TableEnum, @typeName(ParentT))) {
-                            var parent_list = &@field(self.storage, @typeName(ParentT));
-                            var parent_node = &parent_list.items[parent_loc.idx];
-
-                            // Link the child into the parent's child list
-                            child.sibling = parent_node.child;
-                            parent_node.child = child_loc;
-                            break;
-                        }
+            const parent = self.getNode(parent_loc).?;
+            switch (parent) {
+                inline else => |*parent_node| {
+                    const child = self.getNode(child_loc).?;
+                    switch (child) {
+                        inline else => |child_node| child_node.sibling = parent_node.child,
                     }
-                    break;
-                }
+                    parent_node.child = child_loc.toU64();
+                },
             }
         }
 
