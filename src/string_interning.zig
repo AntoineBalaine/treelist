@@ -57,6 +57,14 @@ pub fn add(self: *@This(), allocator: std.mem.Allocator, bytes: []const u8) !Str
     return new_off;
 }
 
+pub fn getStringRef(self: *@This(), key: []const u8) ?StringRef {
+    const index_adapter: TableIndexAdapter = .{
+        .bytes = self.bytes.items,
+    };
+
+    return self.table.getKeyAdapted(key, index_adapter);
+}
+
 pub fn getString(self: @This(), name: StringRef) [:0]const u8 {
     const start_slice = self.bytes.items[@intFromEnum(name)..];
     return start_slice[0..std.mem.indexOfScalar(u8, start_slice, 0).? :0];
@@ -77,6 +85,9 @@ test StringPool {
     try std.testing.expectEqualStrings("hello", pool.getString(hello_ref));
     try std.testing.expectEqualStrings("world", pool.getString(world_ref));
     try std.testing.expectEqualStrings("zig", pool.getString(zig_ref));
+    try std.testing.expectEqual(pool.getStringRef("hello") orelse return try std.testing.expect(false), hello_ref);
+    try std.testing.expectEqual(pool.getStringRef("world") orelse return try std.testing.expect(false), world_ref);
+    try std.testing.expectEqual(pool.getStringRef("zig") orelse return try std.testing.expect(false), zig_ref);
 }
 
 const std = @import("std");
