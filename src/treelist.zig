@@ -38,7 +38,7 @@ pub fn NodeInterface(comptime TableEnum: type) type {
 
 pub fn TreeList(comptime node_types: anytype) type {
     // Generate table enum from node types
-    const TableEnum = blk: {
+    const TypeEnum = blk: {
         var enum_fields: [node_types.len]std.builtin.Type.EnumField = undefined;
         inline for (node_types, 0..) |T, i| {
             enum_fields[i] = .{
@@ -118,7 +118,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         break :blk @Type(.{
             .@"union" = .{
                 .layout = .auto,
-                .tag_type = TableEnum,
+                .tag_type = TypeEnum,
                 .fields = &union_fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
@@ -141,7 +141,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         break :blk @Type(.{
             .@"union" = .{
                 .layout = .auto,
-                .tag_type = TableEnum,
+                .tag_type = TypeEnum,
                 .fields = &union_fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
@@ -149,7 +149,8 @@ pub fn TreeList(comptime node_types: anytype) type {
     };
     return struct {
         const Self = @This();
-        pub const Loc = Location(TableEnum);
+        pub const Loc = Location(TypeEnum);
+        pub const TableEnum = TypeEnum;
         pub const NodeUnion = TypeUnion;
         pub const PtrUnion = NodePtrUnion;
         const MAX_TREE_HEIGHT = 128;
@@ -159,7 +160,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         /// String pool for interning strings
         string_pool: StringPool = .empty,
         /// Map from string refs to root nodes
-        roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TableEnum)) = .{},
+        roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TypeEnum)) = .{},
 
         /// Iterator for traversing the tree without allocations
         pub const Iterator = struct {
@@ -341,9 +342,9 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Append a node value to the tree list
-        pub fn append(self: *Self, comptime T: type, value: T, allocator: std.mem.Allocator) !Location(TableEnum) {
+        pub fn append(self: *Self, comptime T: type, value: T, allocator: std.mem.Allocator) !Location(TypeEnum) {
             // Find the enum value for this type
-            const table_value = @field(TableEnum, @typeName(T));
+            const table_value = @field(TypeEnum, @typeName(T));
 
             // Get the array list for this type
             var list = &@field(self.storage, @typeName(T));
@@ -352,7 +353,7 @@ pub fn TreeList(comptime node_types: anytype) type {
             const idx = list.items.len;
             try list.append(allocator, value);
 
-            return Location(TableEnum){
+            return Location(TypeEnum){
                 .table = table_value,
                 .idx = @intCast(idx),
             };
@@ -361,7 +362,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         /// Get a node as a tagged union for type-safe access
         pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
             inline for (node_types) |T| {
-                if (loc.table == @field(TableEnum, @typeName(T))) {
+                if (loc.table == @field(TypeEnum, @typeName(T))) {
                     const list = &@field(self.storage, @typeName(T));
                     if (loc.idx >= list.items.len) return null;
 
@@ -373,8 +374,8 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Get a typed pointer to a node
-        pub fn getNodeAs(self: *Self, comptime T: type, loc: Location(TableEnum)) ?*T {
-            if (loc.table != @field(TableEnum, @typeName(T))) return null;
+        pub fn getNodeAs(self: *Self, comptime T: type, loc: Location(TypeEnum)) ?*T {
+            if (loc.table != @field(TypeEnum, @typeName(T))) return null;
 
             var list = &@field(self.storage, @typeName(T));
             if (loc.idx >= list.items.len) return null;
@@ -383,13 +384,13 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Add a root node with a name
-        pub fn addRoot(self: *Self, name: []const u8, loc: Location(TableEnum), allocator: std.mem.Allocator) !void {
+        pub fn addRoot(self: *Self, name: []const u8, loc: Location(TypeEnum), allocator: std.mem.Allocator) !void {
             const name_ref = try self.string_pool.add(allocator, name);
             try self.roots.put(allocator, name_ref, loc);
         }
 
         /// Get a root node by name
-        pub fn getRoot(self: *Self, name: []const u8) ?Location(TableEnum) {
+        pub fn getRoot(self: *Self, name: []const u8) ?Location(TypeEnum) {
             // Try to find the string in the pool without adding it
             const context = StringPool.TableContext{ .bytes = self.string_pool.bytes.items };
 
@@ -403,8 +404,8 @@ pub fn TreeList(comptime node_types: anytype) type {
         /// Add a child to a parent node
         pub fn addChild(
             self: *Self,
-            parent_loc: Location(TableEnum),
-            child_loc: Location(TableEnum),
+            parent_loc: Location(TypeEnum),
+            child_loc: Location(TypeEnum),
         ) !void {
             // Get parent node
             var parent = self.getNode(parent_loc).?;
@@ -428,7 +429,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         /// This provides direct access for modifying node properties with full type safety
         pub fn getNodePtr(self: *Self, loc: Loc) ?PtrUnion {
             inline for (node_types) |T| {
-                if (loc.table == @field(TableEnum, @typeName(T))) {
+                if (loc.table == @field(TypeEnum, @typeName(T))) {
                     var list = &@field(self.storage, @typeName(T));
                     if (loc.idx >= list.items.len) return null;
 

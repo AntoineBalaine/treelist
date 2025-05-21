@@ -26,11 +26,12 @@ const StrNode = struct {
 
 test "Insert and retrieve root node" {
     // Create TreeList instance
-    var tree = TreeList(.{
+    const Tree = TreeList(.{
         IntNode,
         FloatNode,
         StrNode,
-    }).empty;
+    });
+    var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
 
@@ -48,11 +49,12 @@ test "Insert and retrieve root node" {
 test "Insert and retrieve root and child nodes" {
     // Define test types
     // Create TreeList instance
-    var tree = TreeList(.{
+    const Tree = TreeList(.{
         IntNode,
         FloatNode,
         StrNode,
-    }).empty;
+    });
+    var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
 
@@ -71,7 +73,7 @@ test "Insert and retrieve root and child nodes" {
 
     // Get the child node by traversing from root
     const child_u64 = root_node.child orelse return std.testing.expect(false);
-    const child_loc = Location(tree.Loc.TableEnum).fromU64(child_u64);
+    const child_loc = Location(Tree.TableEnum).fromU64(child_u64);
 
     // Verify child is a float node with correct value
     const child_node = tree.getNodeAs(FloatNode, child_loc).?;
@@ -81,11 +83,12 @@ test "Insert and retrieve root and child nodes" {
 test "Insert and retrieve root, child, and sibling nodes" {
     // Define test types
     // Create TreeList instance
-    var tree = TreeList(.{
+    const Tree = TreeList(.{
         IntNode,
         FloatNode,
         StrNode,
-    }).empty;
+    });
+    var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
 
@@ -108,13 +111,13 @@ test "Insert and retrieve root, child, and sibling nodes" {
 
     // Get the first child (should be Str since it was added second)
     const first_child_u64 = root_node.child orelse return std.testing.expect(false);
-    const first_child_loc = Location(tree.Loc.TableEnum).fromU64(first_child_u64);
+    const first_child_loc = Location(Tree.TableEnum).fromU64(first_child_u64);
     const first_child = tree.getNodeAs(StrNode, first_child_loc).?;
     try std.testing.expectEqualStrings("hello", first_child.value);
 
     // Get the sibling (should be Float)
     const sibling_u64 = first_child.sibling orelse return std.testing.expect(false);
-    const sibling_loc = Location(tree.Loc.TableEnum).fromU64(sibling_u64);
+    const sibling_loc = Location(Tree.TableEnum).fromU64(sibling_u64);
     const sibling = tree.getNodeAs(FloatNode, sibling_loc).?;
     try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.value, 0.001);
 }
