@@ -10,14 +10,11 @@ pub fn Location(comptime TableEnum: type) type {
         idx: u32,
 
         pub fn toU64(self: @This()) u64 {
-            return (@as(u64, @intFromEnum(self.table))) | self.idx;
+            return @as(u64, @bitCast(self));
         }
 
         pub fn fromU64(value: u64) @This() {
-            return .{
-                .table = @enumFromInt(value),
-                .idx = @truncate(value),
-            };
+            return @as(@This(), @bitCast(value));
         }
 
         pub fn isNone(self: @This()) bool {
@@ -391,10 +388,7 @@ pub fn TreeList(comptime node_types: anytype) type {
 
         /// Get a root node by name
         pub fn getRoot(self: *Self, name: []const u8) ?Location(TypeEnum) {
-            // Try to find the string in the pool without adding it
-            const context = StringPool.TableContext{ .bytes = self.string_pool.bytes.items };
-
-            if (self.string_pool.table.getKeyAdapted(name, context)) |name_ref| {
+            if (self.string_pool.getStringRef(name)) |name_ref| {
                 return self.roots.get(name_ref);
             }
 
@@ -406,11 +400,11 @@ pub fn TreeList(comptime node_types: anytype) type {
             self: *Self,
             parent_loc: Location(TypeEnum),
             child_loc: Location(TypeEnum),
-        ) !void {
+        ) void {
             // Get parent node
-            var parent = self.getNode(parent_loc).?;
+            const parent = self.getNodePtr(parent_loc).?;
             switch (parent) {
-                inline else => |*parent_node| {
+                inline else => |parent_node| {
                     const child = self.getNodePtr(child_loc).?;
                     switch (child) {
                         inline else => |child_node| child_node.sibling = parent_node.child,

@@ -64,7 +64,7 @@ test "Insert and retrieve root and child nodes" {
 
     // Create and add a child node
     const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
-    try tree.addChild(int_loc, float_loc);
+    tree.addChild(int_loc, float_loc);
 
     // Retrieve the root node
     const root_loc = tree.getRoot("root") orelse return std.testing.expect(false);
@@ -73,7 +73,8 @@ test "Insert and retrieve root and child nodes" {
 
     // Get the child node by traversing from root
     const child_u64 = root_node.child orelse return std.testing.expect(false);
-    const child_loc = Location(Tree.TableEnum).fromU64(child_u64);
+    const child_loc = Tree.Loc.fromU64(child_u64);
+    try std.testing.expectEqual(child_u64, float_loc.toU64());
 
     // Verify child is a float node with correct value
     const child_node = tree.getNodeAs(FloatNode, child_loc).?;
@@ -98,11 +99,11 @@ test "Insert and retrieve root, child, and sibling nodes" {
 
     // Create and add first child node (Float)
     const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
-    try tree.addChild(int_loc, float_loc);
+    tree.addChild(int_loc, float_loc);
 
     // Create and add second child node (Str) - becomes sibling of first child
     const str_loc = try tree.append(StrNode, .{ .value = "hello" }, std.testing.allocator);
-    try tree.addChild(int_loc, str_loc);
+    tree.addChild(int_loc, str_loc);
 
     // Retrieve the root node
     const root_loc = tree.getRoot("root") orelse return std.testing.expect(false);
@@ -117,7 +118,7 @@ test "Insert and retrieve root, child, and sibling nodes" {
 
     // Get the sibling (should be Float)
     const sibling_u64 = first_child.sibling orelse return std.testing.expect(false);
-    const sibling_loc = Location(Tree.TableEnum).fromU64(sibling_u64);
+    const sibling_loc = Tree.Loc.fromU64(sibling_u64);
     const sibling = tree.getNodeAs(FloatNode, sibling_loc).?;
     try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.value, 0.001);
 }
