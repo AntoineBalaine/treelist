@@ -194,63 +194,56 @@ pub fn TreeList(comptime node_types: anytype) type {
                 }) |child_u64| {
                     const child = Loc.fromU64(child_u64);
                     self.current = child;
-                    return;
-                }
-
-                // If this node has a sibling, go there next
-                if (switch (node_ptr) {
+                } else if (switch (node_ptr) {
                     inline else => |ptr| ptr.sibling,
                 }) |sibling_u64| {
+                    // If this node has a sibling, go there next
                     const sibling = Loc.fromU64(sibling_u64);
                     self.current = sibling;
-                    return;
+                } else {
+                    // Otherwise, go up to parent and look for next sibling
+                    self.ascendToSibling(current, node_ptr);
                 }
-
-                // Otherwise, go up to parent and look for next sibling
-                self.ascendToSibling(current, node_ptr);
 
                 return node_ptr;
             }
 
             /// Move up to parent and find next sibling - no stack needed!
             fn ascendToSibling(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
-                var current = current_loc;
+                // Get parent location
+                const parent_u64 = switch (current_node) {
+                    inline else => |ptr| ptr.parent,
+                } orelse {
+                    self.current = null;
+                    return;
+                };
 
-                // Go up the parent chain until we find a node with a sibling
-                while (true) {
-                    // Get parent location
-                    const parent_opt = switch (current_node) {
-                        inline else => |ptr| ptr.parent,
-                    };
+                if (parent_u64 == self.start_root.toU64()) {
+                    self.current = null;
+                    return;
+                }
 
-                    // If no parent, we're done
-                    if (parent_opt == null) {
-                        self.current = null;
-                        return;
-                    }
+                const parent_loc = Loc.fromU64(parent_u64);
 
-                    // If we've reached our starting root, we're done
-                    if (parent_opt.? == self.start_root.toU64()) {
-                        self.current = null;
-                        return;
-                    }
+                const parent = self.tree_list.getNodePtr(parent_loc).?;
+                const child_opt = switch (parent) {
+                    inline else => |prnt| prnt.child,
+                };
 
-                    const parent_loc = Loc.fromU64(parent_opt.?);
-
-                    const parent_ptr = self.tree_list.getNodePtr(parent_loc).?;
-
-                    if (switch (parent_ptr) {
-                        inline else => |ptr| ptr.sibling,
-                    }) |sibling_u64| {
-                        // Found a sibling of parent, move there
-                        const sibling = Loc.fromU64(sibling_u64);
-                        self.current = sibling;
-                        return;
-                    } else {
-                        // No sibling for this parent, continue up the chain
-                        current = parent_loc;
+                if (child_opt) |child| {
+                    if (child == current_loc.toU64()) {
+                        if (switch (parent) {
+                            inline else => |prnt| prnt.sibling,
+                        }) |sib| {
+                            self.current = Loc.fromU64(sib);
+                            return;
+                        }
                     }
                 }
+
+                // Current node is not the direct child of parent, or parent has no sibling
+                // Continue up the chain
+                self.ascendToSibling(parent_loc, parent);
             }
         };
 
@@ -348,6 +341,24 @@ pub fn TreeList(comptime node_types: anytype) type {
                         inline else => |child_node| child_node.sibling = parent_node.child,
                     }
                     parent_node.child = child_loc.toU64();
+                },
+            }
+        }
+
+        pub fn addSibling(
+            self: *Self,
+            parent_loc: Location(TypeEnum),
+            sibling_loc: Location(TypeEnum),
+        ) void {
+            // Get parent node
+            const parent = self.getNodePtr(parent_loc).?;
+            switch (parent) {
+                inline else => |parent_node| {
+                    const child = self.getNodePtr(sibling_loc).?;
+                    switch (child) {
+                        inline else => |child_node| child_node.sibling = parent_node.sibling,
+                    }
+                    parent_node.sibling = sibling_loc.toU64();
                 },
             }
         }

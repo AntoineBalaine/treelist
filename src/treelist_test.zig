@@ -125,3 +125,97 @@ test "Insert and retrieve root, child, and sibling nodes" {
     const sibling = tree.getNodeAs(FloatNode, sibling_loc).?;
     try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.value, 0.001);
 }
+
+test "Add and retrieve siblings directly" {
+    // Create TreeList instance
+    const Tree = TreeList(.{
+        IntNode,
+        FloatNode,
+        StrNode,
+    });
+    var tree: Tree = .empty;
+    try tree.init();
+    defer tree.deinit(std.testing.allocator);
+
+    // Create nodes
+    const node1 = try tree.append(IntNode, .{ .value = 10 }, std.testing.allocator);
+    const node2 = try tree.append(IntNode, .{ .value = 20 }, std.testing.allocator);
+    const node3 = try tree.append(IntNode, .{ .value = 30 }, std.testing.allocator);
+
+    // Add node2 as sibling of node1
+    tree.addSibling(node1, node2);
+
+    // Add node3 as sibling of node2
+    tree.addSibling(node2, node3);
+
+    // Verify the sibling chain: node1 -> node2 -> node3
+    const node1_ptr = tree.getNodeAs(IntNode, node1).?;
+    try std.testing.expectEqual(node2.toU64(), node1_ptr.sibling.?);
+
+    const node2_ptr = tree.getNodeAs(IntNode, node2).?;
+    try std.testing.expectEqual(node3.toU64(), node2_ptr.sibling.?);
+
+    const node3_ptr = tree.getNodeAs(IntNode, node3).?;
+    try std.testing.expectEqual(@as(?u64, null), node3_ptr.sibling);
+}
+
+test "Complex tree traversal" {
+    // Create a more complex tree to test traversal
+    //       A
+    //      /
+    //     B---C---D
+    //    /    |   \
+    //   E-F-G H    I-J
+
+    const Tree = TreeList(.{
+        StrNode,
+    });
+    var tree: Tree = .empty;
+    try tree.init();
+    defer tree.deinit(std.testing.allocator);
+
+    // Create nodes
+    const nodeA = try tree.append(StrNode, .{ .value = "A" }, std.testing.allocator);
+    const nodeB = try tree.append(StrNode, .{ .value = "B" }, std.testing.allocator);
+    const nodeC = try tree.append(StrNode, .{ .value = "C" }, std.testing.allocator);
+    const nodeD = try tree.append(StrNode, .{ .value = "D" }, std.testing.allocator);
+    const nodeE = try tree.append(StrNode, .{ .value = "E" }, std.testing.allocator);
+    const nodeF = try tree.append(StrNode, .{ .value = "F" }, std.testing.allocator);
+    const nodeG = try tree.append(StrNode, .{ .value = "G" }, std.testing.allocator);
+    const nodeH = try tree.append(StrNode, .{ .value = "H" }, std.testing.allocator);
+    const nodeI = try tree.append(StrNode, .{ .value = "I" }, std.testing.allocator);
+    const nodeJ = try tree.append(StrNode, .{ .value = "J" }, std.testing.allocator);
+
+    // Build tree structure
+    // A is the root
+    try tree.addRoot("complex_tree", nodeA, std.testing.allocator);
+
+    // B, C, D are children of A
+    tree.addChild(nodeA, nodeB);
+    tree.addSibling(nodeB, nodeC);
+    tree.addSibling(nodeC, nodeD);
+
+    // E, F, G are children of B
+    tree.addChild(nodeB, nodeE);
+    tree.addSibling(nodeE, nodeF);
+    tree.addSibling(nodeF, nodeG);
+
+    // H is child of C
+    tree.addChild(nodeC, nodeH);
+    tree.addChild(nodeD, nodeJ);
+    tree.addSibling(nodeI, nodeJ);
+
+    // Perform depth-first traversal
+    var iter = tree.iterator(nodeA);
+    _ = &iter;
+
+    const vals = [_][]const u8{ "A", "B", "E", "F", "G", "C", "H", "D", "I", "J" };
+    var i: usize = 0;
+    while (iter.nextDepth()) |node_ptr| : (i += 1) {
+        const node_value = switch (node_ptr) {
+            inline else => |ptr| ptr.value,
+        };
+        try std.testing.expectEqualStrings(vals[i], node_value);
+    }
+}
+
