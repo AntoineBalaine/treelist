@@ -45,10 +45,6 @@ pub fn Location(comptime TableEnum: type) type {
         pub fn fromU64(value: u64) @This() {
             return @as(@This(), @bitCast(value));
         }
-
-        pub fn isNone(self: @This()) bool {
-            return self.idx == std.math.maxInt(u32);
-        }
     };
 }
 
@@ -387,6 +383,102 @@ pub fn TreeList(comptime node_types: anytype) type {
         pub fn iteratorFromRoot(self: *Self, name: []const u8) ?Iterator {
             const root_loc = self.getRoot(name) orelse return null;
             return Iterator.init(self, root_loc);
+        }
+
+        /// Remove a node and all its children from the tree
+        /// Uses swap remove to maintain array density
+        pub fn swapRemove(self: *Self, location: Loc) void {
+            const node_ptr = self.getNodePtr(location).?;
+
+            // Handle parent-child relationship
+            switch (node_ptr) {
+                inline else => |node| {
+                    if (node.child) |child_u64| {
+                        try self.swapRemove(Loc.fromU64(child_u64));
+                    }
+                    const parent_u64 = node.parent;
+                    const node_u64 = location.toU64();
+                    const parent_ptr = self.getNodePtr(Loc.fromU64(parent_u64)).?;
+
+                    // Check if this node is the parent's child or sibling
+                    switch (parent_ptr) {
+                        inline else => |parent| {
+                            if (parent.child) |child| {
+                                if (child == node_u64) {
+                                    parent.child = node.sibling;
+                                }
+                            }
+
+                            if (parent.sibling) |sibling| {
+                                if (sibling == node_u64) {
+                                    parent.sibling = node.sibling;
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+
+            // Now perform the actual swap remove in the appropriate array list
+            const last_location = self.swapRemoveFromStorage(location);
+
+            // If we swapped with another node (not the one we just removed)
+            if (last_location) |last_loc| {
+                // Get the swapped node (formerly the last node, now at location)
+                const swapped_node = self.getNodePtr(location).?;
+
+                // If the swapped node had a parent, update the parent's references
+                if (switch (swapped_node) {
+                    inline else => |ptr| ptr.parent,
+                }) |swapped_parent_u64| {
+                    const swapped_parent = self.getNodePtr(Loc.fromU64(swapped_parent_u64)).?;
+
+                    const last_u64 = last_loc.toU64();
+                    const new_u64 = location.toU64();
+
+                    switch (swapped_parent) {
+                        inline else => |parent| {
+                            if (parent.child) |child| {
+                                if (child == last_u64) {
+                                    parent.child = new_u64;
+                                }
+                            }
+
+                            if (parent.sibling) |sibling| {
+                                if (sibling == last_u64) {
+                                    parent.sibling = new_u64;
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+
+        /// Perform the swap remove operation on the appropriate storage array
+        /// Returns the location of the last element that was swapped (or null if no swap occurred)
+        fn swapRemoveFromStorage(self: *Self, loc: Loc) ?Loc {
+            inline for (node_types) |T| {
+                if (loc.table == @field(TypeEnum, @typeName(T))) {
+                    var list = &@field(self.storage, @typeName(T));
+
+                    // If this is the last element, no swap needed
+                    if (loc.idx == list.items.len - 1) {
+                        _ = list.popOrNull();
+                        return null; // No swap occurred
+                    }
+
+                    // Swap with the last element
+                    const last_idx = list.items.len - 1;
+                    list.items[loc.idx] = list.items[last_idx];
+                    _ = list.pop();
+
+                    // Return the location of the element that was moved
+                    return Loc{ .table = loc.table, .idx = @intCast(last_idx) };
+                }
+            }
+
+            return null; // No swap occurred
         }
     };
 }
