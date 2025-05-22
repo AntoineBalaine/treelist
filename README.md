@@ -320,3 +320,136 @@ pub fn addChild(
 }
 ```
 This shouldn’t even be part of the `addChild()` function, though. This feels like overhead - and vanity on my part.
+
+# Iterator to the rescue
+
+If I switch to an iterator, I can consume it right upon instantiation, I can give a max depth, and it dodges the allocation.
+```zig
+/// Iterator for traversing the tree without allocations
+pub const Iterator = struct {
+    tree_list: *Self,
+    current: ?Loc,
+    // Fixed-size stack to avoid allocations
+    stack: [MAX_TREE_HEIGHT]Loc = undefined,
+    stack_len: usize = 0,
+
+    /// Create a new iterator starting at a given root
+    pub fn init(tree_list: *Self, root: Loc) Iterator {
+        return .{
+            .tree_list = tree_list,
+            .current = root,
+            .stack_len = 0,
+        };
+    }
+
+    /// Get the next node in depth-first traversal (child first, then sibling)
+    pub fn next(self: *Iterator) ?PtrUnion {
+        const current = self.current orelse return null;
+
+        // Get the current node pointer
+        const node_ptr = self.tree_list.getNodePtr(current) orelse return null;
+
+        // Prepare to move to the next node
+        self.moveToNext(current, node_ptr);
+
+        return node_ptr;
+    }
+  // […]
+}
+```
+
+There’s an unknow about the max depth of the tree - «is my max_tree_height going to fly?» - but 128 locations-worth represent 1024 bytes on the stack, and should fit the bill alright. 
+
+# What about removing entries from one of the trees?
+
+The issue is that, whenever I decide to remove a node, there’s only two ways to operate a removal: doing swap remove or doing ordered remove from the underlying array. 
+
+This causes an issue: «ordered remove» means falsifying all the `Location`s of the nodes following the removed node in the backing array. Doing «swap remove» (swap with the last element in the backing array) falsifies only one of them, but still falsifies it: fixing the falsification requires knowing where the parent is, and update its pointer. 
+
+In order to do this, the node would have to store the location of its parent, which now brings two falsifications: «swap remove» now would falsify the child location stored in the parent node, and the parent location stored in the child node. Plus, it adds the extra overhead of having to store an extra u64 into the nodes themselves.  
+
+I could delay removals by marking tombstones into the arrays - but this means that tables would have to be compacted sooner or later, which brings about the same problem.   
+
+There’s other options like generational indices which are very ECS-like: you don’t swap the removed nodes, you just increment their generation, and that gives indications about whether or not a slot is available. I hate it: it’s extra logic and it’s extra metadata.
+
+# I want to backtrack without a stack, though
+
+Ok, fine, let’s store a parent-location inside the node.
+```zig
+// I keep this only for reference.
+pub fn NodeInterface(comptime TableEnum: type) type {
+    const Loc = Location(TableEnum);
+    return struct {
+        child: ?Loc = null,
+        sibling: ?Loc = null,
+        parent: ?Loc = null,
+    };
+}
+```
+
+Now I can traverse the tree up and down from any entry point without having to worry. I stick to my state-machine approach:
+
+- if a node is a child, the `parent` field points to its parent.
+- if a node is a sibling, the `parent` field points to its older-sibling.
+- I can know whether a node is a sibling or child by comparing the parent’s `sibling` field.
+
+This makes it possible to backtrack the whole tree. It also makes it possible to traverse siblings-first, without a stack.
+
+With storing the parent location, both the sibling and the child know where the parent is. Now, depending on the order of traversal, the backtracking can decide whether we need to continue up or whether we need to backtrack to the other node of the parent:
+
+```python
+fn nextChild()
+  visitChild()
+  visitSibling()
+  ascendToParentSibling(current_loc, current_node)
+
+
+fn ascendToParentSibling(current_loc, current_node)
+  parent = getParent(current_node.parent)
+  if (parent.child.loc==current_loc)
+    goto parent.sibling
+    return
+  if (parent.sibling.loc == current_loc)
+    nextParentSibling(parent_loc, parent)
+
+fn nextSiblingFirst()
+  visitSibling()
+  visitChild()
+  nextParentChild(current_loc, current_node)
+
+fn nextParentChild()
+  parent = getParent(current_node.parent)
+  if (parent.sibling.loc == current_loc)
+    goto parent.child
+    return
+  if (parent.child.loc == current_loc)
+    nextParentChild(parent_loc, parent_node)
+```
+
+That’s a lot of conditions to check, and your traversal is going to be slow - but it dodges the stack, and the logic is very simple.
+# Pre/Post order traversals, inverting the tree
+
+```
+     a
+   /
+  b----->c -->d
+ /       |   /
+e->f->g  h  i->j
+
+```
+
+
+In my widget tree, the root only has children - that’s in the case where the root might be a window or a top-level UI container.
+Then, the traversal order is actually:
+- without including the backtracks: `a b c d i j h e f g`
+- with backtracks: `a b c d i j i d c h c b e f g f e b a`
+
+If you iterate sibling-first, you can go to the bottom of the tree, and traverse it all the way back up - it is an inverted traversal, so you could do post-order traversal.
+Incidentally, you _could_ also invert your binary tree with this: if you go bottom up and sibling first, you can invert the two sibling/child locations all the way up to the root. There you go, you’ve now satisfied the coding interview meme…
+
+This state-machine approach is very easy to grasp. It still doesn’t give me breadth-first, but that doesn’t matter so much for my gui tree: the entire idea is that I’m storing the data, separate from the drawing logic. Higher nodes represent container widgets, and lower ones represent input, decoration, and interactive widgets. If I do pre-order traversal, in a depth-first style, I’m still getting the containers drawn first, and their children drawn later - which is what we want when drawing elements in an immediate-mode GUI stack.
+
+In a GUI tree:
+- Pre-order traversal visits containers before their contents, which matches the natural drawing order (draw the container, then draw what's inside it)
+- when it comes to clipping regions: container widgets often establish clipping regions that their children need to respect
+
