@@ -4,6 +4,35 @@ fn trimNamespace(name: []const u8) []const u8 {
     return name[lastDot..];
 }
 
+fn interface(node_types: anytype) void {
+    inline for (node_types) |T| {
+        // Check for child field with the right type
+        if (!@hasField(T, "child")) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'child' field");
+        }
+        const ChildType = @TypeOf(@field(@as(T, undefined), "child"));
+        if (ChildType != ?u64) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' has 'child' field of invalid type. Expected ?u64, got " ++ @typeName(ChildType));
+        }
+
+        if (!@hasField(T, "sibling")) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'sibling' field");
+        }
+        const SiblingType = @TypeOf(@field(@as(T, undefined), "sibling"));
+        if (SiblingType != ?u64) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' has 'sibling' field of invalid type. Expected ?u64, got " ++ @typeName(SiblingType));
+        }
+
+        if (!@hasField(T, "parent")) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'parent' field");
+        }
+        const ParentType = @TypeOf(@field(@as(T, undefined), "parent"));
+        if (ParentType != ?u64) {
+            @compileError("Node type '" ++ @typeName(T) ++ "' has 'parent' field of invalid type. Expected ?u64, got " ++ @typeName(ParentType));
+        }
+    }
+}
+
 pub fn Location(comptime TableEnum: type) type {
     return packed struct {
         table: TableEnum,
@@ -30,6 +59,7 @@ pub fn NodeInterface(comptime TableEnum: type) type {
         // These fields must be in every node type
         child: ?Loc = null,
         sibling: ?Loc = null,
+        parent: ?Loc = null, // New parent pointer
     };
 }
 
@@ -53,30 +83,7 @@ pub fn TreeList(comptime node_types: anytype) type {
         });
     };
 
-    // Validate that all node types have the required fields
-    inline for (node_types) |T| {
-        // Check for child field with the right type
-        if (!@hasField(T, "child")) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'child' field");
-        }
-
-        // Check for sibling field with the right type
-        if (!@hasField(T, "sibling")) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'sibling' field");
-        }
-
-        // Check field types - must be optional locations
-        const ChildType = @TypeOf(@field(@as(T, undefined), "child"));
-        const SiblingType = @TypeOf(@field(@as(T, undefined), "sibling"));
-
-        if (ChildType != ?u64) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' has 'child' field of invalid type. Expected ?u64, got " ++ @typeName(ChildType));
-        }
-
-        if (SiblingType != ?u64) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' has 'sibling' field of invalid type. Expected ?u64, got " ++ @typeName(SiblingType));
-        }
-    }
+    interface(node_types);
 
     // Create the Storage struct type with an ArrayList field for each node type
     const Storage = blk: {
@@ -163,65 +170,35 @@ pub fn TreeList(comptime node_types: anytype) type {
         pub const Iterator = struct {
             tree_list: *Self,
             current: ?Loc,
-            // Fixed-size stack to avoid allocations
-            stack: [MAX_TREE_HEIGHT]Loc = undefined,
-            stack_len: usize = 0,
+            start_root: Loc, // Keep track of the starting root to know when we're done
 
             /// Create a new iterator starting at a given root
             pub fn init(tree_list: *Self, root: Loc) Iterator {
                 return .{
                     .tree_list = tree_list,
                     .current = root,
-                    .stack_len = 0,
+                    .start_root = root,
                 };
             }
 
             /// Get the next node in depth-first traversal (child first, then sibling)
-            pub fn next(self: *Iterator) ?PtrUnion {
+            pub fn nextDepth(self: *Iterator) ?PtrUnion {
                 const current = self.current orelse return null;
 
                 // Get the current node pointer
                 const node_ptr = self.tree_list.getNodePtr(current) orelse return null;
-
-                // Prepare to move to the next node
-                self.moveToNext(current, node_ptr);
-
-                return node_ptr;
-            }
-
-            /// Get the next node in sibling-first traversal (breadth-like)
-            pub fn nextSiblingFirst(self: *Iterator) ?PtrUnion {
-                const current = self.current orelse return null;
-
-                // Get the current node pointer
-                const node_ptr = self.tree_list.getNodePtr(current) orelse return null;
-
-                // Prepare to move to the next node (sibling first)
-                self.moveToNextSiblingFirst(current, node_ptr);
-
-                return node_ptr;
-            }
-
-            /// Helper to move to the next node in depth-first order (child first)
-            fn moveToNext(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
 
                 // If this node has a child, go there next
-                if (switch (current_node) {
+                if (switch (node_ptr) {
                     inline else => |ptr| ptr.child,
                 }) |child_u64| {
                     const child = Loc.fromU64(child_u64);
-
-                    // Save current location for backtracking
-                    if (self.stack_len < self.stack.len) {
-                        self.stack[self.stack_len] = current_loc;
-                        self.stack_len += 1;
-                    }
                     self.current = child;
                     return;
                 }
 
                 // If this node has a sibling, go there next
-                if (switch (current_node) {
+                if (switch (node_ptr) {
                     inline else => |ptr| ptr.sibling,
                 }) |sibling_u64| {
                     const sibling = Loc.fromU64(sibling_u64);
@@ -229,90 +206,51 @@ pub fn TreeList(comptime node_types: anytype) type {
                     return;
                 }
 
-                // Otherwise, backtrack and look for a sibling of an ancestor
-                self.backtrackToNextBranch();
+                // Otherwise, go up to parent and look for next sibling
+                self.ascendToSibling(current, node_ptr);
+
+                return node_ptr;
             }
 
-            /// Backtrack up the tree until we find a node with an unused sibling
-            fn backtrackToNextBranch(self: *Iterator) void {
-                while (self.stack_len > 0) {
-                    self.stack_len -= 1;
-                    const parent_loc = self.stack[self.stack_len];
+            /// Move up to parent and find next sibling - no stack needed!
+            fn ascendToSibling(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
+                var current = current_loc;
 
-                    // Get the parent node pointer
-                    if (self.tree_list.getNodePtr(parent_loc)) |parent_ptr| {
-                        // Get parent's sibling
-                        const parent_sibling_opt = switch (parent_ptr) {
-                            inline else => |ptr| ptr.sibling,
-                        };
+                // Go up the parent chain until we find a node with a sibling
+                while (true) {
+                    // Get parent location
+                    const parent_opt = switch (current_node) {
+                        inline else => |ptr| ptr.parent,
+                    };
 
-                        if (parent_sibling_opt) |parent_sibling_u64| {
-                            const parent_sibling = Loc.fromU64(parent_sibling_u64);
-                            self.current = parent_sibling;
-                            return;
-                        }
+                    // If no parent, we're done
+                    if (parent_opt == null) {
+                        self.current = null;
+                        return;
                     }
-                    // Continue backtracking if this parent has no sibling
-                }
 
-                // If we've exhausted all nodes, mark as done
-                self.current = null;
-            }
-
-            /// Helper to move to the next node in sibling-first order (breadth-like)
-            fn moveToNextSiblingFirst(self: *Iterator, current_loc: Loc, current_node: PtrUnion) void {
-                // If this node has a sibling, go there first
-                if (switch (current_node) {
-                    inline else => |ptr| ptr.sibling,
-                }) |sibling_u64| {
-                    const sibling = Loc.fromU64(sibling_u64);
-                    self.current = sibling;
-                    return;
-                }
-
-                // If no sibling but has a child, go to child
-                if (switch (current_node) {
-                    inline else => |ptr| ptr.child,
-                }) |child_u64| {
-                    const child = Loc.fromU64(child_u64);
-
-                    // Save current location for backtracking
-                    if (self.stack_len < self.stack.len) {
-                        self.stack[self.stack_len] = current_loc;
-                        self.stack_len += 1;
+                    // If we've reached our starting root, we're done
+                    if (parent_opt.? == self.start_root.toU64()) {
+                        self.current = null;
+                        return;
                     }
-                    self.current = child;
-                    return;
-                }
 
-                // Otherwise, backtrack and look for a child of an ancestor
-                self.backtrackToNextChild();
-            }
+                    const parent_loc = Loc.fromU64(parent_opt.?);
 
-            /// Backtrack up the tree until we find a node with an unused child
-            fn backtrackToNextChild(self: *Iterator) void {
-                while (self.stack_len > 0) {
-                    self.stack_len -= 1;
-                    const parent_loc = self.stack[self.stack_len];
+                    const parent_ptr = self.tree_list.getNodePtr(parent_loc).?;
 
-                    // Get the parent node pointer
-                    if (self.tree_list.getNodePtr(parent_loc)) |parent_ptr| {
-                        // Get parent's child
-                        const parent_child_opt = switch (parent_ptr) {
-                            inline else => |ptr| ptr.child,
-                        };
-
-                        if (parent_child_opt) |parent_child_u64| {
-                            const parent_child = Loc.fromU64(parent_child_u64);
-                            self.current = parent_child;
-                            return;
-                        }
+                    if (switch (parent_ptr) {
+                        inline else => |ptr| ptr.sibling,
+                    }) |sibling_u64| {
+                        // Found a sibling of parent, move there
+                        const sibling = Loc.fromU64(sibling_u64);
+                        self.current = sibling;
+                        return;
+                    } else {
+                        // No sibling for this parent, continue up the chain
+                        current = parent_loc;
                     }
-                    // Continue backtracking if this parent has no child
                 }
-
-                // If we've exhausted all nodes, mark as done
-                self.current = null;
             }
         };
 

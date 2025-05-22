@@ -10,18 +10,21 @@ const IntNode = struct {
     value: i32,
     child: ?u64 = null,
     sibling: ?u64 = null,
+    parent: ?u64 = null,
 };
 
 const FloatNode = struct {
     value: f64,
     child: ?u64 = null,
     sibling: ?u64 = null,
+    parent: ?u64 = null,
 };
 
 const StrNode = struct {
     value: []const u8,
     child: ?u64 = null,
     sibling: ?u64 = null,
+    parent: ?u64 = null,
 };
 
 test "Insert and retrieve root node" {
