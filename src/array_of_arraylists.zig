@@ -8,7 +8,15 @@ pub fn ArrayOfArrayLists(comptime node_types: anytype) type {
         var enum_fields: [node_types.len]std.builtin.Type.EnumField = undefined;
         inline for (node_types, 0..) |T, i| {
             enum_fields[i] = .{
-                .name = @typeName(T),
+                // Use a simple name extraction instead of full @typeName
+                .name = blk2: {
+                    const full_name = @typeName(T);
+                    // Extract just the type name without module path
+                    // This is a simplified approach - you might need more sophisticated parsing
+                    const last_dot = std.mem.lastIndexOf(u8, full_name, ".") orelse 0;
+                    const simple_name = if (last_dot > 0) full_name[(last_dot + 1)..] else full_name;
+                    break :blk2 simple_name;
+                },
                 .value = i,
             };
         }
@@ -27,7 +35,14 @@ pub fn ArrayOfArrayLists(comptime node_types: anytype) type {
         var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
         inline for (node_types, 0..) |T, i| {
             union_fields[i] = .{
-                .name = @typeName(T),
+                .name = blk2: {
+                    const full_name = @typeName(T);
+                    // Extract just the type name without module path
+                    // This is a simplified approach - you might need more sophisticated parsing
+                    const last_dot = std.mem.lastIndexOf(u8, full_name, ".") orelse 0;
+                    const simple_name = if (last_dot > 0) full_name[(last_dot + 1)..] else full_name;
+                    break :blk2 simple_name;
+                },
                 .type = T,
                 .alignment = @alignOf(T),
             };
@@ -97,7 +112,13 @@ pub fn ArrayOfArrayLists(comptime node_types: anytype) type {
 
         // Get a typed pointer to an item - direct one-liner implementation
         pub fn getItemPtr(self: *Self, tag: TypeEnum, idx: usize) PtrUnion {
-            return @unionInit(PtrUnion, @typeName(node_types[@intFromEnum(tag)]), &self.lists[@intFromEnum(tag)].items[idx]);
+            switch (tag) {
+                inline else => |t| {
+                    const field_name = @tagName(t);
+                    const list_idx = @intFromEnum(t);
+                    return @unionInit(PtrUnion, field_name, &self.lists[list_idx].items[idx]);
+                },
+            }
         }
 
         // Append an item
@@ -131,7 +152,12 @@ pub fn ArrayOfArrayLists(comptime node_types: anytype) type {
 
         // Get the length of a specific list
         pub fn len(self: *Self, tag: TypeEnum) usize {
-            return self.lists[@intFromEnum(tag)].items.len;
+            switch (tag) {
+                inline else => |t| {
+                    const list_idx = @intFromEnum(t);
+                    return self.lists[list_idx].items.len;
+                },
+            }
         }
     };
 }
