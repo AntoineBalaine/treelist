@@ -1,35 +1,86 @@
+pub fn TypeRegistry(comptime Types: type) type {
+    return struct {
+        // Generate type IDs at compile time
+        pub const TypeId = blk: {
+            const fields = @typeInfo(Types).@"struct".fields;
+
+            // Create enum fields
+            var enum_fields: [fields.len + 1]std.builtin.Type.EnumField = undefined;
+
+            // Add a field for each type
+            for (fields, 0..) |field, i| {
+                enum_fields[i] = .{
+                    .name = field.name,
+                    .value = i,
+                };
+            }
+
+            // Add _count field
+            enum_fields[fields.len] = .{
+                .name = "_count",
+                .value = fields.len,
+            };
+
+            // Create the enum type
+            break :blk @Type(.{
+                .@"enum" = .{
+                    .tag_type = u32,
+                    .fields = &enum_fields,
+                    .decls = &[_]std.builtin.Type.Declaration{},
+                    .is_exhaustive = true,
+                },
+            });
+        };
+
+        pub const type_info = blk: {
+            const fields = @typeInfo(Types).@"struct".fields;
+            var types: [fields.len]type = undefined;
+
+            for (fields, 0..) |field, i| {
+                types[i] = field.defaultValue().?;
+            }
+
+            break :blk types;
+        };
+
+        pub fn typeFromId(id: TypeId) type {
+            const idx = @intFromEnum(id);
+            std.debug.assert(idx < type_info.len);
+            return type_info[idx];
+        }
+    };
+}
+
 /// trims prefixed namespaces from a string
 fn trimNamespace(name: []const u8) []const u8 {
     const lastDot = if (std.mem.lastIndexOf(u8, name, ".")) |val| val + 1 else 0;
     return name[lastDot..];
 }
 
-fn interface(node_types: anytype) void {
-    inline for (node_types) |T| {
-        // Check for child field with the right type
-        if (!@hasField(T, "child")) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'child' field");
-        }
-        const ChildType = @TypeOf(@field(@as(T, undefined), "child"));
-        if (ChildType != ?u64) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' has 'child' field of invalid type. Expected ?u64, got " ++ @typeName(ChildType));
-        }
+fn interface(T: type) void {
+    // Check for child field with the right type
+    if (!@hasField(T, "child")) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'child' field");
+    }
+    const ChildType = @TypeOf(@field(@as(T, undefined), "child"));
+    if (ChildType != ?u64) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' has 'child' field of invalid type. Expected ?u64, got " ++ @typeName(ChildType));
+    }
 
-        if (!@hasField(T, "sibling")) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'sibling' field");
-        }
-        const SiblingType = @TypeOf(@field(@as(T, undefined), "sibling"));
-        if (SiblingType != ?u64) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' has 'sibling' field of invalid type. Expected ?u64, got " ++ @typeName(SiblingType));
-        }
+    if (!@hasField(T, "sibling")) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'sibling' field");
+    }
+    const SiblingType = @TypeOf(@field(@as(T, undefined), "sibling"));
+    if (SiblingType != ?u64) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' has 'sibling' field of invalid type. Expected ?u64, got " ++ @typeName(SiblingType));
+    }
 
-        if (!@hasField(T, "parent")) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'parent' field");
-        }
-        const ParentType = @TypeOf(@field(@as(T, undefined), "parent"));
-        if (ParentType != ?u64) {
-            @compileError("Node type '" ++ @typeName(T) ++ "' has 'parent' field of invalid type. Expected ?u64, got " ++ @typeName(ParentType));
-        }
+    if (!@hasField(T, "parent")) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' is missing required 'parent' field");
+    }
+    const ParentType = @TypeOf(@field(@as(T, undefined), "parent"));
+    if (ParentType != ?u64) {
+        @compileError("Node type '" ++ @typeName(T) ++ "' has 'parent' field of invalid type. Expected ?u64, got " ++ @typeName(ParentType));
     }
 }
 
@@ -59,67 +110,37 @@ pub fn NodeInterface(comptime TableEnum: type) type {
     };
 }
 
-pub fn TreeList(comptime node_types: anytype) type {
-    // Generate table enum from node types
-    const TypeEnum = blk: {
-        var enum_fields: [node_types.len]std.builtin.Type.EnumField = undefined;
-        inline for (node_types, 0..) |T, i| {
-            enum_fields[i] = .{
-                .name = @typeName(T),
-                .value = i,
-            };
-        }
-        break :blk @Type(.{
-            .@"enum" = .{
-                .tag_type = u32,
-                .fields = &enum_fields,
-                .decls = &[_]std.builtin.Type.Declaration{},
-                .is_exhaustive = true,
-            },
-        });
-    };
+pub fn TreeList(comptime Types: type) type {
+    // Verify Types is a struct with type fields
+    if (@typeInfo(Types) != .@"struct") {
+        @compileError("Types must be a struct");
+    }
 
-    interface(node_types);
+    const Registry = TypeRegistry(Types);
+    const TypeEnum = Registry.TypeId;
 
-    // Create the Storage struct type with an ArrayList field for each node type
-    const Storage = blk: {
-        var fields: [node_types.len]std.builtin.Type.StructField = undefined;
+    inline for (Registry.type_info) |T| {
+        interface(T);
+    }
 
-        inline for (node_types, 0..) |T, i| {
-            const list_type = std.ArrayListUnmanaged(T);
-            fields[i] = .{
-                .name = @typeName(T),
-                .type = list_type,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(list_type),
-            };
-        }
-
-        break :blk @Type(.{
-            .@"struct" = .{
-                .layout = .auto,
-                .fields = &fields,
-                .decls = &[_]std.builtin.Type.Declaration{},
-                .is_tuple = false,
-            },
-        });
-    };
-
+    // Create union type for node values
     const TypeUnion = blk: {
-        var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
-        inline for (node_types, 0..) |T, i| {
+        var union_fields: [@intFromEnum(TypeEnum._count)]std.builtin.Type.UnionField = undefined;
+
+        inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |field, i| {
+            const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
             union_fields[i] = .{
-                .name = @typeName(T),
+                .name = field.name,
                 .type = T,
                 .alignment = @alignOf(T),
             };
         }
+
         break :blk @Type(.{
             .@"union" = .{
                 .layout = .auto,
                 .tag_type = TypeEnum,
-                .fields = &union_fields,
+                .fields = &union_fields[0..@intFromEnum(TypeEnum._count)],
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
         });
@@ -127,26 +148,27 @@ pub fn TreeList(comptime node_types: anytype) type {
 
     // Create union type for node pointers
     const NodePtrUnion = blk: {
-        var union_fields: [node_types.len]std.builtin.Type.UnionField = undefined;
-        inline for (node_types, 0..) |T, i| {
+        var union_fields: [@intFromEnum(TypeEnum._count)]std.builtin.Type.UnionField = undefined;
+
+        inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |field, i| {
+            const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
             union_fields[i] = .{
-                .name = @typeName(T),
-                // .name = @typeName(T) ++ "Ptr",
-                // .name = trimNamespace(@typeName(T)) ++ "Ptr",
-                // trimNamespace
+                .name = field.name,
                 .type = *T,
                 .alignment = @alignOf(*T),
             };
         }
+
         break :blk @Type(.{
             .@"union" = .{
                 .layout = .auto,
                 .tag_type = TypeEnum,
-                .fields = &union_fields,
+                .fields = &union_fields[0..@intFromEnum(TypeEnum._count)],
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
         });
     };
+
     return struct {
         const Self = @This();
         pub const Loc = Location(TypeEnum);
@@ -155,12 +177,89 @@ pub fn TreeList(comptime node_types: anytype) type {
         pub const PtrUnion = NodePtrUnion;
         const MAX_TREE_HEIGHT = 128;
 
-        /// Storage for each node type
-        storage: Storage = undefined,
+        // Storage arrays - directly accessible by TypeId
+        arrays: [@intFromEnum(TypeEnum._count)]ArrayData = undefined,
+
         /// String pool for interning strings
         string_pool: StringPool = .empty,
         /// Map from string refs to root nodes
         roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TypeEnum)) = .{},
+
+        const ArrayData = struct {
+            data: [*]u8 = undefined,
+            len: usize = 0,
+            capacity: usize = 0,
+            elem_size: usize,
+
+            fn init(comptime T: type) ArrayData {
+                return .{
+                    .elem_size = @sizeOf(T),
+                };
+            }
+
+            fn deinit(self: *ArrayData, allocator: std.mem.Allocator) void {
+                if (self.capacity > 0) {
+                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
+                }
+            }
+
+            fn ensureCapacity(self: *ArrayData, allocator: std.mem.Allocator, new_capacity: usize) !void {
+                if (self.capacity >= new_capacity) return;
+
+                const new_data = try allocator.alloc(u8, new_capacity * self.elem_size);
+                if (self.len > 0) {
+                    @memcpy(new_data[0 .. self.len * self.elem_size], self.data[0 .. self.len * self.elem_size]);
+                }
+
+                if (self.capacity > 0) {
+                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
+                }
+
+                self.data = new_data.ptr;
+                self.capacity = new_capacity;
+            }
+
+            fn append(self: *ArrayData, allocator: std.mem.Allocator, value: anytype) !usize {
+                if (self.len >= self.capacity) {
+                    try self.ensureCapacity(allocator, if (self.capacity == 0) 4 else self.capacity * 2);
+                }
+
+                const idx = self.len;
+                const ptr = self.data + (idx * self.elem_size);
+                @memcpy(ptr[0..self.elem_size], std.mem.asBytes(&value));
+                self.len += 1;
+                return idx;
+            }
+
+            fn getPtr(self: *ArrayData, comptime T: type, idx: usize) ?*T {
+                if (idx >= self.len) return null;
+                const ptr = self.data + (idx * self.elem_size);
+                return @ptrCast(@alignCast(ptr));
+            }
+
+            fn getSlice(self: *ArrayData, comptime T: type) []T {
+                const typed_ptr: [*]T = @ptrCast(@alignCast(self.data));
+                return typed_ptr[0..self.len];
+            }
+
+            fn swapRemove(self: *ArrayData, idx: usize) ?usize {
+                if (idx >= self.len) return;
+
+                // If this is the last element, just decrement length
+                if (idx == self.len - 1) {
+                    self.len -= 1;
+                    return null;
+                }
+
+                // Swap with the last element
+                const last_idx = self.len - 1;
+                const dst_ptr = self.data + (idx * self.elem_size);
+                const src_ptr = self.data + (last_idx * self.elem_size);
+                @memcpy(dst_ptr[0..self.elem_size], src_ptr[0..self.elem_size]);
+                self.len -= 1;
+                return last_idx;
+            }
+        };
 
         /// Iterator for traversing the tree without allocations
         pub const Iterator = struct {
@@ -245,17 +344,18 @@ pub fn TreeList(comptime node_types: anytype) type {
 
         pub const empty: @This() = .{};
 
-        pub fn init(self: *Self) !void {
-            // Initialize each storage array
-            inline for (node_types) |T| {
-                @field(self.storage, @typeName(T)) = .empty;
+        pub fn init(self: *Self) void {
+            // Initialize each array
+            inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |_, i| {
+                const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
+                self.arrays[i] = ArrayData.init(T);
             }
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            // Free each storage array
-            inline for (node_types) |T| {
-                @field(self.storage, @typeName(T)).deinit(allocator);
+            // Free each array
+            inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |_, i| {
+                self.arrays[i].deinit(allocator);
             }
 
             // Free the string pool
@@ -266,45 +366,44 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Append a node value to the tree list
-        pub fn append(self: *Self, comptime T: type, value: T, allocator: std.mem.Allocator) !Location(TypeEnum) {
-            // Find the enum value for this type
-            const table_value = @field(TypeEnum, @typeName(T));
-
-            // Get the array list for this type
-            var list = &@field(self.storage, @typeName(T));
-
-            // Add the node with the provided value
-            const idx = list.items.len;
-            try list.append(allocator, value);
+        pub fn append(
+            self: *Self,
+            comptime id: TypeEnum,
+            value: Registry.typeFromId(id),
+            allocator: std.mem.Allocator,
+        ) !Location(TypeEnum) {
+            const idx = try self.arrays[@intFromEnum(id)].append(allocator, value);
 
             return Location(TypeEnum){
-                .table = table_value,
+                .table = id,
                 .idx = @intCast(idx),
             };
         }
 
         /// Get a node as a tagged union for type-safe access
         pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
-            inline for (node_types) |T| {
-                if (loc.table == @field(TypeEnum, @typeName(T))) {
-                    const list = &@field(self.storage, @typeName(T));
-                    if (loc.idx >= list.items.len) return null;
+            const table_idx = @intFromEnum(loc.table);
+            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
 
-                    // Create and return the union directly
-                    return @unionInit(NodeUnion, @typeName(T), list.items[loc.idx]);
-                }
-            }
-            return null;
+            const array = &self.arrays[table_idx];
+            if (loc.idx >= array.len) return null;
+
+            // Create the union based on the table index
+            return switch (loc.table) {
+                inline else => |tag| blk: {
+                    const T = Registry.typeFromId(tag);
+                    const ptr = array.getPtr(T, loc.idx) orelse break :blk null;
+                    break :blk @unionInit(NodeUnion, @tagName(tag), ptr.*);
+                },
+            };
         }
 
         /// Get a typed pointer to a node
         pub fn getNodeAs(self: *Self, comptime T: type, loc: Location(TypeEnum)) ?*T {
-            if (loc.table != @field(TypeEnum, @typeName(T))) return null;
+            const table_idx = @intFromEnum(loc.table);
+            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
 
-            var list = &@field(self.storage, @typeName(T));
-            if (loc.idx >= list.items.len) return null;
-
-            return &list.items[loc.idx];
+            return self.arrays[table_idx].getPtr(T, loc.idx);
         }
 
         /// Add a root node with a name
@@ -365,18 +464,21 @@ pub fn TreeList(comptime node_types: anytype) type {
         }
 
         /// Get a typed pointer to a node as a union of pointers
-        /// This provides direct access for modifying node properties with full type safety
         pub fn getNodePtr(self: *Self, loc: Loc) ?PtrUnion {
-            inline for (node_types) |T| {
-                if (loc.table == @field(TypeEnum, @typeName(T))) {
-                    var list = &@field(self.storage, @typeName(T));
-                    if (loc.idx >= list.items.len) return null;
+            const table_idx = @intFromEnum(loc.table);
+            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
 
-                    // Create and return the pointer union
-                    return @unionInit(PtrUnion, @typeName(T), &list.items[loc.idx]);
-                }
-            }
-            return null;
+            const array = &self.arrays[table_idx];
+            if (loc.idx >= array.len) return null;
+
+            // Create the pointer union based on the table index
+            return switch (loc.table) {
+                inline else => |tag| blk: {
+                    const T = Registry.typeFromId(tag);
+                    const ptr = array.getPtr(T, loc.idx) orelse break :blk null;
+                    break :blk @unionInit(PtrUnion, @tagName(tag), ptr);
+                },
+            };
         }
 
         /// Create an iterator from a named root
@@ -394,91 +496,87 @@ pub fn TreeList(comptime node_types: anytype) type {
             switch (node_ptr) {
                 inline else => |node| {
                     if (node.child) |child_u64| {
-                        try self.swapRemove(Loc.fromU64(child_u64));
+                        self.swapRemove(Loc.fromU64(child_u64));
                     }
-                    const parent_u64 = node.parent;
-                    const node_u64 = location.toU64();
-                    const parent_ptr = self.getNodePtr(Loc.fromU64(parent_u64)).?;
+                    if (node.parent) |parent_u64| {
+                        const node_u64 = location.toU64();
+                        const parent_ptr = self.getNodePtr(Loc.fromU64(parent_u64)).?;
 
-                    // Check if this node is the parent's child or sibling
-                    switch (parent_ptr) {
-                        inline else => |parent| {
-                            if (parent.child) |child| {
-                                if (child == node_u64) {
-                                    parent.child = node.sibling;
+                        // Check if this node is the parent's child or sibling
+                        switch (parent_ptr) {
+                            inline else => |parent| blk: {
+                                if (parent.child) |child| {
+                                    if (child == node_u64) {
+                                        parent.child = node.sibling;
+                                        break :blk;
+                                    }
                                 }
-                            }
 
-                            if (parent.sibling) |sibling| {
-                                if (sibling == node_u64) {
-                                    parent.sibling = node.sibling;
+                                if (parent.sibling) |sibling| {
+                                    if (sibling == node_u64) {
+                                        parent.sibling = node.sibling;
+                                    }
                                 }
-                            }
-                        },
+                            },
+                        }
                     }
                 },
             }
 
-            // Now perform the actual swap remove in the appropriate array list
-            const last_location = self.swapRemoveFromStorage(location);
+            // Now perform the actual swap remove in the appropriate array
+            const table_idx = @intFromEnum(location.table);
+            const array = &self.arrays[table_idx];
+
+            const last_location = array.swapRemove(location.idx);
 
             // If we swapped with another node (not the one we just removed)
-            if (last_location) |last_loc| {
-                // Get the swapped node (formerly the last node, now at location)
-                const swapped_node = self.getNodePtr(location).?;
+            if (last_location) |last_idx| {
+                self.updateReferences(
+                    Loc{ .table = location.table, .idx = @intCast(last_idx) },
+                    location,
+                );
+            }
+        }
 
-                // If the swapped node had a parent, update the parent's references
-                if (switch (swapped_node) {
-                    inline else => |ptr| ptr.parent,
-                }) |swapped_parent_u64| {
-                    const swapped_parent = self.getNodePtr(Loc.fromU64(swapped_parent_u64)).?;
+        /// Update all references to a node that was moved
+        fn updateReferences(self: *Self, old_loc: Loc, new_loc: Loc) void {
+            const moved_node = self.getNodePtr(new_loc).?;
 
-                    const last_u64 = last_loc.toU64();
-                    const new_u64 = location.toU64();
+            // If the swapped node had a parent, update the parent's references
+            if (switch (moved_node) {
+                inline else => |ptr| ptr.parent,
+            }) |parent_u64| {
+                const parent = self.getNodePtr(Loc.fromU64(parent_u64)).?;
 
-                    switch (swapped_parent) {
-                        inline else => |parent| {
-                            if (parent.child) |child| {
-                                if (child == last_u64) {
-                                    parent.child = new_u64;
-                                }
+                const old_u64 = old_loc.toU64();
+                const new_u64 = new_loc.toU64();
+
+                switch (parent) {
+                    inline else => |parent_node| {
+                        if (parent_node.child) |child| {
+                            if (child == old_u64) {
+                                parent_node.child = new_u64;
                             }
+                        }
 
-                            if (parent.sibling) |sibling| {
-                                if (sibling == last_u64) {
-                                    parent.sibling = new_u64;
-                                }
+                        if (parent_node.sibling) |sibling| {
+                            if (sibling == old_u64) {
+                                parent_node.sibling = new_u64;
                             }
-                        },
-                    }
+                        }
+                    },
                 }
             }
         }
 
-        /// Perform the swap remove operation on the appropriate storage array
-        /// Returns the location of the last element that was swapped (or null if no swap occurred)
-        fn swapRemoveFromStorage(self: *Self, loc: Loc) ?Loc {
-            inline for (node_types) |T| {
-                if (loc.table == @field(TypeEnum, @typeName(T))) {
-                    var list = &@field(self.storage, @typeName(T));
+        // Get a slice of all items of a type
+        pub fn items(self: *Self, comptime id: TypeEnum) []Registry.typeFromId(id) {
+            return self.arrays[@intFromEnum(id)].getSlice(Registry.typeFromId(id));
+        }
 
-                    // If this is the last element, no swap needed
-                    if (loc.idx == list.items.len - 1) {
-                        _ = list.popOrNull();
-                        return null; // No swap occurred
-                    }
-
-                    // Swap with the last element
-                    const last_idx = list.items.len - 1;
-                    list.items[loc.idx] = list.items[last_idx];
-                    _ = list.pop();
-
-                    // Return the location of the element that was moved
-                    return Loc{ .table = loc.table, .idx = @intCast(last_idx) };
-                }
-            }
-
-            return null; // No swap occurred
+        // Count items of a specific type
+        pub fn count(self: *Self, comptime id: TypeEnum) usize {
+            return self.arrays[@intFromEnum(id)].len;
         }
     };
 }

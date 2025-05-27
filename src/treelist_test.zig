@@ -27,13 +27,16 @@ const StrNode = struct {
     parent: ?u64 = null,
 };
 
+// Define a struct of node types for TreeList
+const NodeTypes = struct {
+    IntNode: type = IntNode,
+    FloatNode: type = FloatNode,
+    StrNode: type = StrNode,
+};
+
 test "Insert and retrieve root node" {
     // Create TreeList instance
-    const Tree = TreeList(.{
-        IntNode,
-        FloatNode,
-        StrNode,
-    });
+    const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
@@ -50,13 +53,8 @@ test "Insert and retrieve root node" {
 }
 
 test "Insert and retrieve root and child nodes" {
-    // Define test types
     // Create TreeList instance
-    const Tree = TreeList(.{
-        IntNode,
-        FloatNode,
-        StrNode,
-    });
+    const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
@@ -85,13 +83,8 @@ test "Insert and retrieve root and child nodes" {
 }
 
 test "Insert and retrieve root, child, and sibling nodes" {
-    // Define test types
     // Create TreeList instance
-    const Tree = TreeList(.{
-        IntNode,
-        FloatNode,
-        StrNode,
-    });
+    const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
@@ -128,11 +121,7 @@ test "Insert and retrieve root, child, and sibling nodes" {
 
 test "Add and retrieve siblings directly" {
     // Create TreeList instance
-    const Tree = TreeList(.{
-        IntNode,
-        FloatNode,
-        StrNode,
-    });
+    const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
@@ -167,9 +156,11 @@ test "Complex tree traversal" {
     //    /    |   \
     //   E-F-G H    I-J
 
-    const Tree = TreeList(.{
-        StrNode,
-    });
+    // Define a struct with just StrNode for this test
+    const SimpleNodeTypes = struct {
+        StrNode: type = StrNode,
+    };
+    const Tree = TreeList(SimpleNodeTypes);
     var tree: Tree = .empty;
     try tree.init();
     defer tree.deinit(std.testing.allocator);
