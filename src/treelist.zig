@@ -178,6 +178,7 @@ pub fn TreeList(comptime Types: type) type {
         pub const TableEnum = TypeEnum;
         pub const NodeUnion = TypeUnion;
         pub const PtrUnion = NodePtrUnion;
+        pub const Reg = Registry;
         const MAX_TREE_HEIGHT = 128;
 
         // Storage arrays - directly accessible by TypeId

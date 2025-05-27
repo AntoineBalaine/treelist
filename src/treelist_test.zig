@@ -42,7 +42,7 @@ test "Insert and retrieve root node" {
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node
-    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    const int_loc = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 42 }, std.testing.allocator);
     try tree.addRoot("root", int_loc, std.testing.allocator);
 
     // Retrieve the root node
@@ -60,11 +60,11 @@ test "Insert and retrieve root and child nodes" {
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node
-    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    const int_loc = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 42 }, std.testing.allocator);
     try tree.addRoot("root", int_loc, std.testing.allocator);
 
     // Create and add a child node
-    const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
+    const float_loc = try tree.append(Tree.Reg.idFromType(FloatNode), .{ .value = 3.14 }, std.testing.allocator);
     tree.addChild(int_loc, float_loc);
 
     // Retrieve the root node
@@ -90,15 +90,15 @@ test "Insert and retrieve root, child, and sibling nodes" {
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node (Int)
-    const int_loc = try tree.append(IntNode, .{ .value = 42 }, std.testing.allocator);
+    const int_loc = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 42 }, std.testing.allocator);
     try tree.addRoot("root", int_loc, std.testing.allocator);
 
     // Create and add first child node (Float)
-    const float_loc = try tree.append(FloatNode, .{ .value = 3.14 }, std.testing.allocator);
+    const float_loc = try tree.append(Tree.Reg.idFromType(FloatNode), .{ .value = 3.14 }, std.testing.allocator);
     tree.addChild(int_loc, float_loc);
 
     // Create and add second child node (Str) - becomes sibling of first child
-    const str_loc = try tree.append(StrNode, .{ .value = "hello" }, std.testing.allocator);
+    const str_loc = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "hello" }, std.testing.allocator);
     tree.addChild(int_loc, str_loc);
 
     // Retrieve the root node
@@ -127,9 +127,9 @@ test "Add and retrieve siblings directly" {
     defer tree.deinit(std.testing.allocator);
 
     // Create nodes
-    const node1 = try tree.append(IntNode, .{ .value = 10 }, std.testing.allocator);
-    const node2 = try tree.append(IntNode, .{ .value = 20 }, std.testing.allocator);
-    const node3 = try tree.append(IntNode, .{ .value = 30 }, std.testing.allocator);
+    const node1 = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 10 }, std.testing.allocator);
+    const node2 = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 20 }, std.testing.allocator);
+    const node3 = try tree.append(Tree.Reg.idFromType(IntNode), .{ .value = 30 }, std.testing.allocator);
 
     // Add node2 as sibling of node1
     tree.addSibling(node1, node2);
@@ -166,16 +166,16 @@ test "Complex tree traversal" {
     defer tree.deinit(std.testing.allocator);
 
     // Create nodes
-    const nodeA = try tree.append(StrNode, .{ .value = "A" }, std.testing.allocator);
-    const nodeB = try tree.append(StrNode, .{ .value = "B" }, std.testing.allocator);
-    const nodeC = try tree.append(StrNode, .{ .value = "C" }, std.testing.allocator);
-    const nodeD = try tree.append(StrNode, .{ .value = "D" }, std.testing.allocator);
-    const nodeE = try tree.append(StrNode, .{ .value = "E" }, std.testing.allocator);
-    const nodeF = try tree.append(StrNode, .{ .value = "F" }, std.testing.allocator);
-    const nodeG = try tree.append(StrNode, .{ .value = "G" }, std.testing.allocator);
-    const nodeH = try tree.append(StrNode, .{ .value = "H" }, std.testing.allocator);
-    const nodeI = try tree.append(StrNode, .{ .value = "I" }, std.testing.allocator);
-    const nodeJ = try tree.append(StrNode, .{ .value = "J" }, std.testing.allocator);
+    const nodeA = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "A" }, std.testing.allocator);
+    const nodeB = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "B" }, std.testing.allocator);
+    const nodeC = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "C" }, std.testing.allocator);
+    const nodeD = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "D" }, std.testing.allocator);
+    const nodeE = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "E" }, std.testing.allocator);
+    const nodeF = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "F" }, std.testing.allocator);
+    const nodeG = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "G" }, std.testing.allocator);
+    const nodeH = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "H" }, std.testing.allocator);
+    const nodeI = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "I" }, std.testing.allocator);
+    const nodeJ = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "J" }, std.testing.allocator);
 
     // Build tree structure
     // A is the root
