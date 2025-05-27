@@ -1,14 +1,14 @@
 const std = @import("std");
 
 /// A type registry that maps struct fields to enum values for direct indexing
-pub fn TypeRegistry(comptime Types: type) type {
+pub fn TypeRegistry(comptime TypeStruct: type) type {
     return struct {
         // Generate type IDs at compile time
         pub const TypeId = blk: {
-            const fields = @typeInfo(Types).@"struct".fields;
+            const fields = @typeInfo(TypeStruct).@"struct".fields;
 
-            // Create enum fields
-            var enum_fields: [fields.len + 1]std.builtin.Type.EnumField = undefined;
+            // Create enum fields - without _count
+            var enum_fields: [fields.len]std.builtin.Type.EnumField = undefined;
 
             // Add a field for each type
             for (fields, 0..) |field, i| {
@@ -17,12 +17,6 @@ pub fn TypeRegistry(comptime Types: type) type {
                     .value = i,
                 };
             }
-
-            // Add _count field
-            enum_fields[fields.len] = .{
-                .name = "_count",
-                .value = fields.len,
-            };
 
             // Create the enum type
             break :blk @Type(.{
@@ -35,24 +29,31 @@ pub fn TypeRegistry(comptime Types: type) type {
             });
         };
 
-        // Get the actual type for a TypeId
-        pub fn TypeFromId(comptime id: TypeId) type {
-            const fields = @typeInfo(Types).@"struct".fields;
-            const tag_name = @tagName(id);
-
-            // Skip _count which isn't a real field
-            if (comptime std.mem.eql(u8, tag_name, "_count")) {
-                @compileError("Cannot get type for _count");
-            }
-
-            // Find the field with matching name and return its type
-            inline for (fields) |field| {
-                if (comptime std.mem.eql(u8, field.name, tag_name)) {
-                    return field.defaultValue().?;
+        /// Get the TypeId for a given type
+        pub fn idFromType(comptime T: type) TypeId {
+            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |_, i| {
+                if (Types[i] == T) {
+                    return @as(TypeId, @enumFromInt(i));
                 }
             }
+            @compileError("Type not found in registry");
+        }
 
-            @compileError("No field named " ++ tag_name);
+        pub const Types = blk: {
+            const fields = @typeInfo(TypeStruct).@"struct".fields;
+            var types: [fields.len]type = undefined;
+
+            for (fields, 0..) |field, i| {
+                types[i] = field.defaultValue().?;
+            }
+
+            break :blk types;
+        };
+
+        pub fn typeFromId(id: TypeId) type {
+            const idx = @intFromEnum(id);
+            std.debug.assert(idx < Types.len);
+            return Types[idx];
         }
     };
 }
@@ -73,18 +74,22 @@ test "TypeRegistry with two fields" {
 
     // Check the length of the enum fields
     const enum_fields = @typeInfo(Registry.TypeId).@"enum".fields;
-    try std.testing.expectEqual(@as(usize, 3), enum_fields.len); // field1, field2, _count
+    try std.testing.expectEqual(@as(usize, 2), enum_fields.len); // field1, field2
 
     // Check that the enum values match the expected indices
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(id1));
     try std.testing.expectEqual(@as(u32, 1), @intFromEnum(id2));
 
-    // Check that _count is correct
-    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(Registry.TypeId._count));
+    try std.testing.expectEqual(@as(usize, 2), Registry.Types.len);
 
     // Check that we can retrieve the correct types
-    try std.testing.expectEqual(u8, Registry.TypeFromId(.field1));
-    try std.testing.expectEqual(u16, Registry.TypeFromId(.field2));
+    try std.testing.expectEqual(u8, Registry.typeFromId(.field1));
+    try std.testing.expectEqual(u16, Registry.typeFromId(.field2));
+    try std.testing.expectEqual(u8, Registry.typeFromId(.field1));
+
+    // Check that idFromType works correctly
+    try std.testing.expectEqual(id1, Registry.idFromType(u8));
+    try std.testing.expectEqual(id2, Registry.idFromType(u16));
 }
 
 /// A storage container that allows direct indexing into arrays of different types
@@ -95,7 +100,7 @@ pub fn DirectStorage(comptime Types: type) type {
         pub const TypeId = Registry.TypeId;
 
         // Storage arrays - directly accessible by TypeId
-        arrays: [@intFromEnum(TypeId._count)]ArrayData = undefined,
+        arrays: [Registry.Types.len]ArrayData = undefined,
 
         const ArrayData = struct {
             data: [*]u8 = undefined,
@@ -157,36 +162,32 @@ pub fn DirectStorage(comptime Types: type) type {
 
         pub fn init() Self {
             var self: Self = undefined;
-            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |field, i| {
-                if (field.name[0] != '_') { // Skip _count
-                    const T = Registry.TypeFromId(@as(TypeId, @enumFromInt(i)));
-                    self.arrays[i] = ArrayData.init(T);
-                }
+            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |_, i| {
+                const T = Registry.typeFromId(@as(TypeId, @enumFromInt(i)));
+                self.arrays[i] = ArrayData.init(T);
             }
             return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |field, i| {
-                if (field.name[0] != '_') {
-                    self.arrays[i].deinit(allocator);
-                }
+            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |_, i| {
+                self.arrays[i].deinit(allocator);
             }
         }
 
         // Add an item of a specific type - returns the index
-        pub fn append(self: *Self, comptime id: TypeId, value: Registry.TypeFromId(id), allocator: std.mem.Allocator) !usize {
+        pub fn append(self: *Self, comptime id: TypeId, value: Registry.typeFromId(id), allocator: std.mem.Allocator) !usize {
             return try self.arrays[@intFromEnum(id)].append(allocator, value);
         }
 
         // Get a typed pointer to an item - no branching, direct indexing
-        pub fn getPtr(self: *Self, comptime id: TypeId, idx: usize) ?*Registry.TypeFromId(id) {
-            return self.arrays[@intFromEnum(id)].getPtr(Registry.TypeFromId(id), idx);
+        pub fn getPtr(self: *Self, comptime id: TypeId, idx: usize) ?*Registry.typeFromId(id) {
+            return self.arrays[@intFromEnum(id)].getPtr(Registry.typeFromId(id), idx);
         }
 
         // Get a slice of all items of a type - no branching
-        pub fn items(self: *Self, comptime id: TypeId) []Registry.TypeFromId(id) {
-            return self.arrays[@intFromEnum(id)].getSlice(Registry.TypeFromId(id));
+        pub fn items(self: *Self, comptime id: TypeId) []Registry.typeFromId(id) {
+            return self.arrays[@intFromEnum(id)].getSlice(Registry.typeFromId(id));
         }
 
         // Count items of a specific type - no branching
