@@ -1,11 +1,11 @@
-pub fn TypeRegistry(comptime Types: type) type {
+pub fn TypeRegistry(comptime TypeStruct: type) type {
     return struct {
         // Generate type IDs at compile time
         pub const TypeId = blk: {
-            const fields = @typeInfo(Types).@"struct".fields;
+            const fields = @typeInfo(TypeStruct).@"struct".fields;
 
-            // Create enum fields
-            var enum_fields: [fields.len + 1]std.builtin.Type.EnumField = undefined;
+            // Create enum fields - without _count
+            var enum_fields: [fields.len]std.builtin.Type.EnumField = undefined;
 
             // Add a field for each type
             for (fields, 0..) |field, i| {
@@ -14,12 +14,6 @@ pub fn TypeRegistry(comptime Types: type) type {
                     .value = i,
                 };
             }
-
-            // Add _count field
-            enum_fields[fields.len] = .{
-                .name = "_count",
-                .value = fields.len,
-            };
 
             // Create the enum type
             break :blk @Type(.{
@@ -32,8 +26,8 @@ pub fn TypeRegistry(comptime Types: type) type {
             });
         };
 
-        pub const type_info = blk: {
-            const fields = @typeInfo(Types).@"struct".fields;
+        pub const Types = blk: {
+            const fields = @typeInfo(TypeStruct).@"struct".fields;
             var types: [fields.len]type = undefined;
 
             for (fields, 0..) |field, i| {
@@ -43,10 +37,19 @@ pub fn TypeRegistry(comptime Types: type) type {
             break :blk types;
         };
 
+        pub fn idFromType(comptime T: type) TypeId {
+            inline for (@typeInfo(TypeId).@"enum".fields, 0..) |_, i| {
+                if (Types[i] == T) {
+                    return @as(TypeId, @enumFromInt(i));
+                }
+            }
+            @compileError("mismatched enum type");
+        }
+
         pub fn typeFromId(id: TypeId) type {
             const idx = @intFromEnum(id);
-            std.debug.assert(idx < type_info.len);
-            return type_info[idx];
+            std.debug.assert(idx < Types.len);
+            return Types[idx];
         }
     };
 }
@@ -119,15 +122,15 @@ pub fn TreeList(comptime Types: type) type {
     const Registry = TypeRegistry(Types);
     const TypeEnum = Registry.TypeId;
 
-    inline for (Registry.type_info) |T| {
+    inline for (Registry.Types) |T| {
         interface(T);
     }
 
     // Create union type for node values
     const TypeUnion = blk: {
-        var union_fields: [@intFromEnum(TypeEnum._count)]std.builtin.Type.UnionField = undefined;
+        var union_fields: [Registry.Types.len]std.builtin.Type.UnionField = undefined;
 
-        inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |field, i| {
+        inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |field, i| {
             const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
             union_fields[i] = .{
                 .name = field.name,
@@ -140,7 +143,7 @@ pub fn TreeList(comptime Types: type) type {
             .@"union" = .{
                 .layout = .auto,
                 .tag_type = TypeEnum,
-                .fields = &union_fields[0..@intFromEnum(TypeEnum._count)],
+                .fields = &union_fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
         });
@@ -148,9 +151,9 @@ pub fn TreeList(comptime Types: type) type {
 
     // Create union type for node pointers
     const NodePtrUnion = blk: {
-        var union_fields: [@intFromEnum(TypeEnum._count)]std.builtin.Type.UnionField = undefined;
+        var union_fields: [Registry.Types.len]std.builtin.Type.UnionField = undefined;
 
-        inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |field, i| {
+        inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |field, i| {
             const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
             union_fields[i] = .{
                 .name = field.name,
@@ -163,7 +166,7 @@ pub fn TreeList(comptime Types: type) type {
             .@"union" = .{
                 .layout = .auto,
                 .tag_type = TypeEnum,
-                .fields = &union_fields[0..@intFromEnum(TypeEnum._count)],
+                .fields = &union_fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
             },
         });
@@ -178,7 +181,7 @@ pub fn TreeList(comptime Types: type) type {
         const MAX_TREE_HEIGHT = 128;
 
         // Storage arrays - directly accessible by TypeId
-        arrays: [@intFromEnum(TypeEnum._count)]ArrayData = undefined,
+        arrays: [Registry.Types.len]ArrayData = undefined,
 
         /// String pool for interning strings
         string_pool: StringPool = .empty,
@@ -346,7 +349,7 @@ pub fn TreeList(comptime Types: type) type {
 
         pub fn init(self: *Self) void {
             // Initialize each array
-            inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |_, i| {
+            inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
                 const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
                 self.arrays[i] = ArrayData.init(T);
             }
@@ -354,7 +357,7 @@ pub fn TreeList(comptime Types: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             // Free each array
-            inline for (@typeInfo(TypeEnum).@"enum".fields[0..@intFromEnum(TypeEnum._count)], 0..) |_, i| {
+            inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
                 self.arrays[i].deinit(allocator);
             }
 
@@ -383,7 +386,7 @@ pub fn TreeList(comptime Types: type) type {
         /// Get a node as a tagged union for type-safe access
         pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
             const table_idx = @intFromEnum(loc.table);
-            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
+            if (table_idx >= Registry.Types.len) return null;
 
             const array = &self.arrays[table_idx];
             if (loc.idx >= array.len) return null;
@@ -401,7 +404,7 @@ pub fn TreeList(comptime Types: type) type {
         /// Get a typed pointer to a node
         pub fn getNodeAs(self: *Self, comptime T: type, loc: Location(TypeEnum)) ?*T {
             const table_idx = @intFromEnum(loc.table);
-            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
+            if (table_idx >= Registry.Types.len) return null;
 
             return self.arrays[table_idx].getPtr(T, loc.idx);
         }
@@ -466,7 +469,7 @@ pub fn TreeList(comptime Types: type) type {
         /// Get a typed pointer to a node as a union of pointers
         pub fn getNodePtr(self: *Self, loc: Loc) ?PtrUnion {
             const table_idx = @intFromEnum(loc.table);
-            if (table_idx >= @intFromEnum(TypeEnum._count)) return null;
+            if (table_idx >= Registry.Types.len) return null;
 
             const array = &self.arrays[table_idx];
             if (loc.idx >= array.len) return null;

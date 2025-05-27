@@ -38,7 +38,7 @@ test "Insert and retrieve root node" {
     // Create TreeList instance
     const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
-    try tree.init();
+    tree.init();
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node
@@ -56,7 +56,7 @@ test "Insert and retrieve root and child nodes" {
     // Create TreeList instance
     const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
-    try tree.init();
+    tree.init();
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node
@@ -86,7 +86,7 @@ test "Insert and retrieve root, child, and sibling nodes" {
     // Create TreeList instance
     const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
-    try tree.init();
+    tree.init();
     defer tree.deinit(std.testing.allocator);
 
     // Create and add a root node (Int)
@@ -123,7 +123,7 @@ test "Add and retrieve siblings directly" {
     // Create TreeList instance
     const Tree = TreeList(NodeTypes);
     var tree: Tree = .empty;
-    try tree.init();
+    tree.init();
     defer tree.deinit(std.testing.allocator);
 
     // Create nodes
@@ -162,7 +162,7 @@ test "Complex tree traversal" {
     };
     const Tree = TreeList(SimpleNodeTypes);
     var tree: Tree = .empty;
-    try tree.init();
+    tree.init();
     defer tree.deinit(std.testing.allocator);
 
     // Create nodes
@@ -209,4 +209,3 @@ test "Complex tree traversal" {
         try std.testing.expectEqualStrings(vals[i], node_value);
     }
 }
-
