@@ -174,8 +174,8 @@ test "Complex tree traversal" {
     const nodeF = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "F" }, std.testing.allocator);
     const nodeG = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "G" }, std.testing.allocator);
     const nodeH = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "H" }, std.testing.allocator);
-    const nodeI = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "I" }, std.testing.allocator);
-    const nodeJ = try tree.append(Tree.Reg.idFromType(StrNode), .{ .value = "J" }, std.testing.allocator);
+    const nodeI = try tree.appendUnion(.{ .StrNode = .{ .value = "I" } }, std.testing.allocator);
+    const nodeJ = try tree.appendUnion(.{ .StrNode = .{ .value = "J" } }, std.testing.allocator);
 
     // Build tree structure
     // A is the root

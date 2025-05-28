@@ -384,6 +384,23 @@ pub fn TreeList(comptime Types: type) type {
             };
         }
 
+        pub fn appendUnion(
+            self: *Self,
+            value: NodeUnion,
+            allocator: std.mem.Allocator,
+        ) !Location(TypeEnum) {
+            // Extract the tag and value from the union
+            return switch (value) {
+                inline else => |typed_value, tag| {
+                    const idx = try self.arrays[@intFromEnum(tag)].append(allocator, typed_value);
+                    return Location(TypeEnum){
+                        .table = tag,
+                        .idx = @intCast(idx),
+                    };
+                },
+            };
+        }
+
         /// Get a node as a tagged union for type-safe access
         pub fn getNode(self: *Self, loc: Loc) ?NodeUnion {
             const table_idx = @intFromEnum(loc.table);
