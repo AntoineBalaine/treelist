@@ -105,21 +105,19 @@ test "Insert and retrieve root, child, and sibling nodes" {
 
     // Get the first child (should be Str since it was added second)
     const first_child_idx = switch (root_node) {
-        .IntNode => |node| node.child,
-        else => unreachable,
+        inline else => |node| node.child,
     } orelse return std.testing.expect(false);
 
     const first_child = tree.getNode(first_child_idx).?;
-    try std.testing.expectEqualStrings("hello", first_child.StrNode.value);
+    try std.testing.expectApproxEqAbs(@as(f64, 3.14), first_child.FloatNode.value, 0.001);
 
     // Get the sibling (should be Float)
     const sibling_idx = switch (first_child) {
-        .StrNode => |node| node.sibling,
-        else => unreachable,
+        inline else => |node| node.sibling,
     } orelse return std.testing.expect(false);
 
     const sibling = tree.getNode(sibling_idx).?;
-    try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.FloatNode.value, 0.001);
+    try std.testing.expectEqualStrings("hello", sibling.StrNode.value);
 }
 
 test "Add and retrieve siblings directly" {

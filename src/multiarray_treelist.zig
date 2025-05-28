@@ -202,7 +202,6 @@ pub fn MultiArrayTreeList(comptime NodeUnion: type) type {
 
                 switch (child) {
                     inline else => |*node| {
-                        node.sibling = null;
                         node.parent = parent_idx;
                     },
                 }
@@ -219,7 +218,7 @@ pub fn MultiArrayTreeList(comptime NodeUnion: type) type {
             var sibling = self.getNode(sibling_idx).?;
             var current_idx = older_sibling_idx;
 
-            while (true) loop: {
+            loop: while (true) {
                 var current = self.getNode(current_idx).?;
 
                 // Check if current node has a sibling
