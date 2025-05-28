@@ -181,89 +181,13 @@ pub fn TreeList(comptime Types: type) type {
         pub const Reg = Registry;
         const MAX_TREE_HEIGHT = 128;
 
-        // Storage arrays - directly accessible by TypeId
-        arrays: [Registry.Types.len]ArrayData = undefined,
+        // Storage arrays - specialized for each type with proper alignment
+        arrays: [Registry.Types.len]anyopaque = undefined,
 
         /// String pool for interning strings
         string_pool: StringPool = .empty,
         /// Map from string refs to root nodes
         roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TypeEnum)) = .{},
-
-        const ArrayData = struct {
-            data: [*]u8 = undefined,
-            len: usize = 0,
-            capacity: usize = 0,
-            elem_size: usize,
-
-            fn init(comptime T: type) ArrayData {
-                return .{
-                    .elem_size = @sizeOf(T),
-                };
-            }
-
-            fn deinit(self: *ArrayData, allocator: std.mem.Allocator) void {
-                if (self.capacity > 0) {
-                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
-                }
-            }
-
-            fn ensureCapacity(self: *ArrayData, allocator: std.mem.Allocator, new_capacity: usize) !void {
-                if (self.capacity >= new_capacity) return;
-
-                const new_data = try allocator.alloc(u8, new_capacity * self.elem_size);
-                if (self.len > 0) {
-                    @memcpy(new_data[0 .. self.len * self.elem_size], self.data[0 .. self.len * self.elem_size]);
-                }
-
-                if (self.capacity > 0) {
-                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
-                }
-
-                self.data = new_data.ptr;
-                self.capacity = new_capacity;
-            }
-
-            fn append(self: *ArrayData, allocator: std.mem.Allocator, value: anytype) !usize {
-                if (self.len >= self.capacity) {
-                    try self.ensureCapacity(allocator, if (self.capacity == 0) 4 else self.capacity * 2);
-                }
-
-                const idx = self.len;
-                const ptr = self.data + (idx * self.elem_size);
-                @memcpy(ptr[0..self.elem_size], std.mem.asBytes(&value));
-                self.len += 1;
-                return idx;
-            }
-
-            fn getPtr(self: *ArrayData, comptime T: type, idx: usize) ?*T {
-                if (idx >= self.len) return null;
-                const ptr = self.data + (idx * self.elem_size);
-                return @ptrCast(@alignCast(ptr));
-            }
-
-            fn getSlice(self: *ArrayData, comptime T: type) []T {
-                const typed_ptr: [*]T = @ptrCast(@alignCast(self.data));
-                return typed_ptr[0..self.len];
-            }
-
-            fn swapRemove(self: *ArrayData, idx: usize) ?usize {
-                if (idx >= self.len) return;
-
-                // If this is the last element, just decrement length
-                if (idx == self.len - 1) {
-                    self.len -= 1;
-                    return null;
-                }
-
-                // Swap with the last element
-                const last_idx = self.len - 1;
-                const dst_ptr = self.data + (idx * self.elem_size);
-                const src_ptr = self.data + (last_idx * self.elem_size);
-                @memcpy(dst_ptr[0..self.elem_size], src_ptr[0..self.elem_size]);
-                self.len -= 1;
-                return last_idx;
-            }
-        };
 
         /// Iterator for traversing the tree without allocations
         pub const Iterator = struct {
@@ -349,17 +273,22 @@ pub fn TreeList(comptime Types: type) type {
         pub const empty: @This() = .{};
 
         pub fn init(self: *Self) void {
-            // Initialize each array
+            // Initialize each array with proper alignment
             inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
                 const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
-                self.arrays[i] = ArrayData.init(T);
+                const ArrayT = ArrayData(T);
+                const array_ptr: *ArrayT = @ptrCast(&self.arrays[i]);
+                array_ptr.* = ArrayT.init();
             }
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            // Free each array
+            // Free each array with proper alignment
             inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
-                self.arrays[i].deinit(allocator);
+                const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
+                const ArrayT = ArrayData(T);
+                const array_ptr: *ArrayT = @ptrCast(&self.arrays[i]);
+                array_ptr.deinit(allocator);
             }
 
             // Free the string pool
@@ -376,7 +305,10 @@ pub fn TreeList(comptime Types: type) type {
             value: Registry.typeFromId(id),
             allocator: std.mem.Allocator,
         ) !Location(TypeEnum) {
-            const idx = try self.arrays[@intFromEnum(id)].append(allocator, value);
+            const T = Registry.typeFromId(id);
+            const ArrayT = ArrayData(T);
+            const array: *ArrayT = @ptrCast(&self.arrays[@intFromEnum(id)]);
+            const idx = try array.append(allocator, value);
 
             return Location(TypeEnum){
                 .table = id,
@@ -392,7 +324,10 @@ pub fn TreeList(comptime Types: type) type {
             // Extract the tag and value from the union
             return switch (value) {
                 inline else => |typed_value, tag| {
-                    const idx = try self.arrays[@intFromEnum(tag)].append(allocator, typed_value);
+                    const T = @TypeOf(typed_value);
+                    const ArrayT = ArrayData(T);
+                    const array: *ArrayT = @ptrCast(&self.arrays[@intFromEnum(tag)]);
+                    const idx = try array.append(allocator, typed_value);
                     return Location(TypeEnum){
                         .table = tag,
                         .idx = @intCast(idx),
@@ -406,15 +341,18 @@ pub fn TreeList(comptime Types: type) type {
             const table_idx = @intFromEnum(loc.table);
             if (table_idx >= Registry.Types.len) return null;
 
-            const array = &self.arrays[table_idx];
-            if (loc.idx >= array.len) return null;
-
-            // Create the union based on the table index
+            // Get properly aligned array for this type
             return switch (loc.table) {
                 inline else => |tag| blk: {
                     const T = Registry.typeFromId(tag);
-                    const ptr = array.getPtr(T, loc.idx) orelse break :blk null;
-                    break :blk @unionInit(NodeUnion, @tagName(tag), ptr.*);
+                    const ArrayT = ArrayData(T);
+                    const array: *ArrayT = @ptrCast(&self.arrays[table_idx]);
+
+                    if (loc.idx >= array.len) break :blk null;
+
+                    const item_ptr: ?*T = array.getPtr(T, loc.idx);
+                    const item = item_ptr orelse break :blk null;
+                    break :blk @unionInit(NodeUnion, @tagName(tag), item.*);
                 },
             };
         }
@@ -509,13 +447,15 @@ pub fn TreeList(comptime Types: type) type {
             const table_idx = @intFromEnum(loc.table);
             if (table_idx >= Registry.Types.len) return null;
 
-            const array = &self.arrays[table_idx];
-            if (loc.idx >= array.len) return null;
-
-            // Create the pointer union based on the table index
+            // Get properly aligned array for this type
             return switch (loc.table) {
                 inline else => |tag| blk: {
                     const T = Registry.typeFromId(tag);
+                    const ArrayT = ArrayData(T);
+                    const array: *ArrayT = @ptrCast(&self.arrays[table_idx]);
+
+                    if (loc.idx >= array.len) break :blk null;
+
                     const ptr = array.getPtr(T, loc.idx) orelse break :blk null;
                     break :blk @unionInit(PtrUnion, @tagName(tag), ptr);
                 },
@@ -566,7 +506,11 @@ pub fn TreeList(comptime Types: type) type {
 
             // Now perform the actual swap remove in the appropriate array
             const table_idx = @intFromEnum(location.table);
-            const array = &self.arrays[table_idx];
+
+            // Get properly aligned array for this type
+            const T = Registry.typeFromId(location.table);
+            const ArrayT = ArrayData(T);
+            const array: *ArrayT = @ptrCast(&self.arrays[table_idx]);
 
             const last_location = array.swapRemove(location.idx);
 
@@ -612,15 +556,22 @@ pub fn TreeList(comptime Types: type) type {
 
         // Get a slice of all items of a type
         pub fn items(self: *Self, comptime id: TypeEnum) []Registry.typeFromId(id) {
-            return self.arrays[@intFromEnum(id)].getSlice(Registry.typeFromId(id));
+            const T = Registry.typeFromId(id);
+            const ArrayT = ArrayData(T);
+            const array: *ArrayT = @ptrCast(&self.arrays[@intFromEnum(id)]);
+            return array.getSlice(T);
         }
 
         // Count items of a specific type
         pub fn count(self: *Self, comptime id: TypeEnum) usize {
-            return self.arrays[@intFromEnum(id)].len;
+            const T = Registry.typeFromId(id);
+            const ArrayT = ArrayData(T);
+            const array: *ArrayT = @ptrCast(&self.arrays[@intFromEnum(id)]);
+            return array.len;
         }
     };
 }
 
 const std = @import("std");
 const StringPool = @import("string_interning.zig");
+const ArrayData = @import("ArrayData.zig");
