@@ -106,17 +106,17 @@ test "Insert and retrieve root, child, and sibling nodes" {
     const root_node = tree.getNodeAs(IntNode, root_loc).?;
     try std.testing.expectEqual(@as(i32, 42), root_node.value);
 
-    // Get the first child (should be Str since it was added second)
+    // Get the first child
     const first_child_u64 = root_node.child orelse return std.testing.expect(false);
     const first_child_loc = Location(Tree.TableEnum).fromU64(first_child_u64);
-    const first_child = tree.getNodeAs(StrNode, first_child_loc).?;
-    try std.testing.expectEqualStrings("hello", first_child.value);
+    const first_child = tree.getNodeAs(FloatNode, first_child_loc).?;
+    try std.testing.expectApproxEqAbs(@as(f64, 3.14), first_child.value, 0.001);
 
     // Get the sibling (should be Float)
     const sibling_u64 = first_child.sibling orelse return std.testing.expect(false);
     const sibling_loc = Tree.Loc.fromU64(sibling_u64);
-    const sibling = tree.getNodeAs(FloatNode, sibling_loc).?;
-    try std.testing.expectApproxEqAbs(@as(f64, 3.14), sibling.value, 0.001);
+    const sibling = tree.getNodeAs(StrNode, sibling_loc).?;
+    try std.testing.expectEqualStrings("hello", sibling.value);
 }
 
 test "Add and retrieve siblings directly" {

@@ -452,11 +452,16 @@ pub fn TreeList(comptime Types: type) type {
             const parent = self.getNodePtr(parent_loc).?;
             switch (parent) {
                 inline else => |parent_node| {
-                    const child = self.getNodePtr(child_loc).?;
-                    switch (child) {
-                        inline else => |child_node| child_node.sibling = parent_node.child,
+                    const parent_child_opt = parent_node.child;
+                    if (parent_child_opt) |cur_child_loc| {
+                        self.addSibling(Loc.fromU64(cur_child_loc), child_loc);
+                    } else {
+                        const child = self.getNodePtr(child_loc).?;
+                        switch (child) {
+                            inline else => |child_node| child_node.sibling = parent_node.child,
+                        }
+                        parent_node.child = child_loc.toU64();
                     }
-                    parent_node.child = child_loc.toU64();
                 },
             }
         }
@@ -467,15 +472,30 @@ pub fn TreeList(comptime Types: type) type {
             sibling_loc: Location(TypeEnum),
         ) void {
             // Get parent node
-            const parent = self.getNodePtr(parent_loc).?;
-            switch (parent) {
-                inline else => |parent_node| {
-                    const child = self.getNodePtr(sibling_loc).?;
-                    switch (child) {
-                        inline else => |child_node| child_node.sibling = parent_node.sibling,
+            const sibling = self.getNodePtr(sibling_loc).?;
+            var current_loc = parent_loc;
+            loop: while (true) {
+                const current = self.getNodePtr(current_loc).?;
+
+                //check if current node has a sibling
+                const next_sibling_opt = switch (current) {
+                    inline else => |cur_node| cur_node.sibling,
+                };
+                if (next_sibling_opt) |next_sibling_loc| {
+                    current_loc = Loc.fromU64(next_sibling_loc);
+                } else {
+                    switch (current) {
+                        inline else => |cur_node| {
+                            cur_node.sibling = sibling_loc.toU64();
+                        },
                     }
-                    parent_node.sibling = sibling_loc.toU64();
-                },
+                    switch (sibling) {
+                        inline else => |sibling_node| {
+                            sibling_node.parent = current_loc.toU64();
+                        },
+                    }
+                    break :loop;
+                }
             }
         }
 
