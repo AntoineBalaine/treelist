@@ -453,3 +453,65 @@ In a GUI tree:
 - Pre-order traversal visits containers before their contents, which matches the natural drawing order (draw the container, then draw what's inside it)
 - when it comes to clipping regions: container widgets often establish clipping regions that their children need to respect
 
+# after doing the implementation
+The end result of the tree:
+
+# Benchmarking
+
+Here’s a project in which I’m implementing an in-memory database of trees.
+
+The goal of the database is to house some pre-made GUI layouts for audio FX. Each layout is a tree of sub-components. Components typically carry data like x/y coordinates, font sizes, colors, etc. 
+Each FX on the user’s computer can have a layout, which allows for quick recall to display in an fx-rack host (think of an fx rack like Ableton’s).
+
+Tree nodes are of heterogeneous types. I want to have as good a cache locality as possible, so I want each node type to be stored in a dedicated table. This allows accessing nodes via indexes, instead of using pointers.
+That’s my initial implementation: the TreeList. The Treelist accepts a struct of types at compile time, and creates a list of tables for each type in the struct. From there, node addressing can be done using direct indexing into the list of tables. The concept is very simple, though the implementation definitely gave me a few grey hairs.
+
+There’s another possible approach, instead of using a list of tables: you can use a multi-array list, and store unions. This makes for a much simpler implementation, though initially I’d dissed it because there’s difference ratios in memory sizes of my node types of 1 to 10. I felt stupid knowing that the smaller variants would end up using 10 times as much memory just because of how unions work.
+
+Nevertheless, I decided to investigate what such a scenario would _actually_ cost in terms of perf. So I set out to implementing a second version of my TreeList, backed by a multi-array list instead of a list of tables.
+
+When it comes to the tree algos (traversals, appends, etc.), they’re the same.
+
+In order to compare the versions, I’ve created a program which can take cli arguments to trigger the use of either of the data structs. The programs will then be loaded in p.o.o.p. or hyperfine for comparison.   
+
+The base execution config looks as follows:
+```zig
+const BenchmarkConfig = struct {
+  num_trees: usize = 1000,
+  nodes_per_tree: usize = 100_000,
+ ich // […]
+};
+```
+
+And the run gives me: 
+```sh
+hyperfine "./zig-out/bin/benchmark --impl=treelist" "./zig-out/bin/benchmark --impl=multiarray" 
+Benchmark 1: ./zig-out/bin/benchmark --impl=treelist
+  Time (mean ± σ):      1.879 s ±  0.006 s    [User: 1.757 s, System: 0.122 s]
+  Range (min … max):    1.872 s …  1.890 s    10 runs
+ 
+Benchmark 2: ./zig-out/bin/benchmark --impl=multiarray
+  Time (mean ± σ):      6.754 s ±  0.078 s    [User: 5.296 s, System: 1.177 s]
+  Range (min … max):    6.664 s …  6.897 s    10 runs
+ 
+Summary
+  ./zig-out/bin/benchmark --impl=treelist ran
+    3.59 ± 0.04 times faster than ./zig-out/bin/benchmark --impl=multiarray
+```
+But that’s just for running creations.
+If I add 10 traversals of all the trees in the database on top of that, we get a much bleaker picture:
+```sh
+hyperfine "./zig-out/bin/benchmark --impl=treelist" "./zig-out/bin/benchmark --impl=multiarray"
+Benchmark 1: ./zig-out/bin/benchmark --impl=treelist
+  Time (mean ± σ):      1.915 s ±  0.009 s    [User: 1.766 s, System: 0.149 s]
+  Range (min … max):    1.907 s …  1.935 s    10 runs
+ 
+Benchmark 2: ./zig-out/bin/benchmark --impl=multiarray
+  Time (mean ± σ):     19.726 s ±  0.191 s    [User: 18.596 s, System: 1.014 s]
+  Range (min … max):   19.520 s … 20.109 s    10 runs
+ 
+Summary
+  ./zig-out/bin/benchmark --impl=treelist ran
+   10.30 ± 0.11 times faster than ./zig-out/bin/benchmark --impl=multiarray
+```
+Obviously, I’ve picked the worst possible usage scenario for the multiarray list, here.
