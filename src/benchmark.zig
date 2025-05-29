@@ -239,8 +239,8 @@ pub fn main() !void {
 
     var impl_type: []const u8 = "treelist";
     var op_type: []const u8 = "create";
-    var num_trees: usize = 100;
-    var nodes_per_tree: usize = 1000;
+    var num_trees: usize = 1000;
+    var nodes_per_tree: usize = 100_000;
 
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "--impl=")) {

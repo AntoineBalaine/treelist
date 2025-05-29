@@ -54,6 +54,18 @@ pub fn build(b: *std.Build) void {
     const benchmark_step = b.step("benchmark", "Build the benchmark executable");
     benchmark_step.dependOn(&b.addInstallArtifact(benchmark_exe, .{}).step);
 
+    // Create a run step for the benchmark
+    const run_benchmark = b.addRunArtifact(benchmark_exe);
+
+    // By default, the run step does nothing unless explicitly requested
+    if (b.args) |args| {
+        run_benchmark.addArgs(args);
+    }
+
+    // Add a step to run the benchmark
+    const run_step = b.step("run-benchmark", "Run the benchmark with arguments");
+    run_step.dependOn(&run_benchmark.step);
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
