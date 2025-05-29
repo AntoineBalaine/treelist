@@ -83,7 +83,9 @@ fn benchmark(allocator: std.mem.Allocator, op: []const u8, config: BenchmarkConf
         try createForest(allocator, BackingType, tree_list, config);
     } else if (std.mem.eql(u8, op, "traverse")) {
         try createForest(allocator, BackingType, tree_list, config);
-        try traverseForest(tree_list);
+        for (0..10) |_| {
+            try traverseForest(tree_list);
+        }
     } else if (std.mem.eql(u8, op, "memory")) {
         try createForest(allocator, BackingType, tree_list, config);
         // Just create and exit - memory will be measured externally
@@ -219,9 +221,9 @@ fn traverseForest(tree_list: anytype) !void {
         // Traverse all nodes
         while (iter.nextDepth()) |node| {
             switch (node) {
-                .SmallNode => |ptr| sum += ptr.value,
-                .MediumNode => |ptr| sum += ptr.value,
-                .LargeNode => |ptr| sum += ptr.value,
+                .SmallNode => |ptr| sum = sum +% ptr.value,
+                .MediumNode => |ptr| sum = sum +% ptr.value,
+                .LargeNode => |ptr| sum = sum +% ptr.value,
             }
         }
     }
@@ -238,7 +240,7 @@ pub fn main() !void {
     _ = args.next();
 
     var impl_type: []const u8 = "treelist";
-    var op_type: []const u8 = "create";
+    var op_type: []const u8 = "traverse";
     var num_trees: usize = 1000;
     var nodes_per_tree: usize = 100_000;
 
