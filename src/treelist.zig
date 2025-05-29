@@ -1,3 +1,14 @@
+/// Calculate the maximum alignment required for any type in the registry
+pub fn calculateMaxAlignment(comptime Registry: type) u29 {
+    var max_align: u29 = 1;
+    inline for (Registry.Types) |T| {
+        const type_align = @alignOf(T);
+        if (type_align > max_align) {
+            max_align = type_align;
+        }
+    }
+    return max_align;
+}
 pub fn TypeRegistry(comptime TypeStruct: type) type {
     return struct {
         // Generate type IDs at compile time
@@ -181,89 +192,103 @@ pub fn TreeList(comptime Types: type) type {
         pub const Reg = Registry;
         const MAX_TREE_HEIGHT = 128;
 
-        // Storage arrays - directly accessible by TypeId
-        arrays: [Registry.Types.len]ArrayData = undefined,
+        // Calculate the maximum alignment needed for any type
+        const max_alignment = calculateMaxAlignment(Registry);
+
+        // Storage arrays with maximum alignment for all types
+        arrays: [Registry.Types.len]ArrayData(max_alignment) = undefined,
 
         /// String pool for interning strings
         string_pool: StringPool = .empty,
         /// Map from string refs to root nodes
         roots: std.AutoHashMapUnmanaged(StringPool.StringRef, Location(TypeEnum)) = .{},
+        pub fn ArrayData(comptime alignment: u29) type {
+            return struct {
+                data: [*]align(alignment) u8 = undefined,
+                len: usize = 0,
+                capacity: usize = 0,
+                elem_size: usize,
 
-        const ArrayData = struct {
-            data: [*]u8 = undefined,
-            len: usize = 0,
-            capacity: usize = 0,
-            elem_size: usize,
-
-            fn init(comptime T: type) ArrayData {
-                return .{
-                    .elem_size = @sizeOf(T),
-                };
-            }
-
-            fn deinit(self: *ArrayData, allocator: std.mem.Allocator) void {
-                if (self.capacity > 0) {
-                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
-                }
-            }
-
-            fn ensureCapacity(self: *ArrayData, allocator: std.mem.Allocator, new_capacity: usize) !void {
-                if (self.capacity >= new_capacity) return;
-
-                const new_data = try allocator.alloc(u8, new_capacity * self.elem_size);
-                if (self.len > 0) {
-                    @memcpy(new_data[0 .. self.len * self.elem_size], self.data[0 .. self.len * self.elem_size]);
+                pub fn init(comptime T: type) @This() {
+                    return .{
+                        .elem_size = @sizeOf(T),
+                    };
                 }
 
-                if (self.capacity > 0) {
-                    allocator.free(self.data[0 .. self.capacity * self.elem_size]);
+                pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                    if (self.data != undefined and self.capacity > 0) {
+                        allocator.free(self.data[0 .. self.capacity * self.elem_size]);
+                        self.* = .{};
+                    }
                 }
 
-                self.data = new_data.ptr;
-                self.capacity = new_capacity;
-            }
+                pub fn ensureCapacity(self: *@This(), allocator: std.mem.Allocator, requested_capacity: usize) !void {
+                    if (requested_capacity <= self.capacity) return;
 
-            fn append(self: *ArrayData, allocator: std.mem.Allocator, value: anytype) !usize {
-                if (self.len >= self.capacity) {
-                    try self.ensureCapacity(allocator, if (self.capacity == 0) 4 else self.capacity * 2);
+                    const new_capacity = @max(requested_capacity, if (self.capacity == 0) 4 else self.capacity * 2);
+                    // Allocate new memory with specified alignment
+                    const new_data = try allocator.alignedAlloc(u8, alignment, new_capacity * self.elem_size);
+
+                    // Copy existing data if any
+                    if (self.capacity > 0) {
+                        @memcpy(new_data[0 .. self.len * self.elem_size], self.data[0 .. self.len * self.elem_size]);
+                        allocator.free(self.data[0 .. self.capacity * self.elem_size]);
+                    }
+
+                    self.data = new_data.ptr;
+                    self.capacity = new_capacity;
                 }
 
-                const idx = self.len;
-                const ptr = self.data + (idx * self.elem_size);
-                @memcpy(ptr[0..self.elem_size], std.mem.asBytes(&value));
-                self.len += 1;
-                return idx;
-            }
+                fn append(self: *@This(), allocator: std.mem.Allocator, value: anytype) !usize {
+                    try self.ensureCapacity(allocator, self.len + 1);
 
-            fn getPtr(self: *ArrayData, comptime T: type, idx: usize) ?*T {
-                if (idx >= self.len) return null;
-                const ptr = self.data + (idx * self.elem_size);
-                return @ptrCast(@alignCast(ptr));
-            }
+                    const idx = self.len;
+                    const ptr = self.data + (idx * self.elem_size);
+                    @memcpy(ptr[0..self.elem_size], std.mem.asBytes(&value));
+                    self.len += 1;
+                    return idx;
+                }
 
-            fn getSlice(self: *ArrayData, comptime T: type) []T {
-                const typed_ptr: [*]T = @ptrCast(@alignCast(self.data));
-                return typed_ptr[0..self.len];
-            }
+                /// Get a pointer to an element at the given index
+                pub fn getPtr(self: *@This(), comptime T: type, idx: usize) ?*T {
+                    if (idx >= self.len) return null;
 
-            fn swapRemove(self: *ArrayData, idx: usize) ?usize {
-                if (idx >= self.len) return;
+                    // Calculate byte offset
+                    const offset = idx * self.elem_size;
 
-                // If this is the last element, just decrement length
-                if (idx == self.len - 1) {
+                    // Create properly aligned pointer
+                    const ptr = &self.data[offset];
+
+                    // Cast to the requested type with alignment check
+                    return @ptrCast(@alignCast(ptr));
+                }
+
+                pub fn getSlice(self: *@This(), comptime T: type) []T {
+                    const ptr = @as([*]T, @ptrCast(@alignCast(self.data)));
+                    return ptr[0..self.len];
+                }
+
+                /// Remove an element by swapping it with the last element
+                pub fn swapRemove(self: *@This(), idx: usize) ?usize {
+                    if (idx >= self.len) return null;
+                    if (idx == self.len - 1) {
+                        self.len -= 1;
+                        return null;
+                    }
+
+                    // Calculate byte positions
+                    const remove_pos = idx * self.elem_size;
+                    const last_pos = (self.len - 1) * self.elem_size;
+
+                    const dst_ptr = self.data[remove_pos .. remove_pos + self.elem_size];
+                    const src_ptr = self.data[last_pos .. last_pos + self.elem_size];
+                    @memcpy(dst_ptr, src_ptr);
+
                     self.len -= 1;
-                    return null;
+                    return self.len; // Return the index of the last element that was moved
                 }
-
-                // Swap with the last element
-                const last_idx = self.len - 1;
-                const dst_ptr = self.data + (idx * self.elem_size);
-                const src_ptr = self.data + (last_idx * self.elem_size);
-                @memcpy(dst_ptr[0..self.elem_size], src_ptr[0..self.elem_size]);
-                self.len -= 1;
-                return last_idx;
-            }
-        };
+            };
+        }
 
         /// Iterator for traversing the tree without allocations
         pub const Iterator = struct {
@@ -349,17 +374,19 @@ pub fn TreeList(comptime Types: type) type {
         pub const empty: @This() = .{};
 
         pub fn init(self: *Self) void {
-            // Initialize each array
-            inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
+            // Initialize each array with proper element size
+            inline for (0..Registry.Types.len) |i| {
                 const T = Registry.typeFromId(@as(TypeEnum, @enumFromInt(i)));
-                self.arrays[i] = ArrayData.init(T);
+                self.arrays[i] = ArrayData(max_alignment).init(T);
             }
+            self.string_pool = .empty;
+            self.roots = .{};
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             // Free each array
-            inline for (@typeInfo(TypeEnum).@"enum".fields, 0..) |_, i| {
-                self.arrays[i].deinit(allocator);
+            for (self.arrays) |*array| {
+                array.deinit(allocator);
             }
 
             // Free the string pool
@@ -409,7 +436,6 @@ pub fn TreeList(comptime Types: type) type {
             const array = &self.arrays[table_idx];
             if (loc.idx >= array.len) return null;
 
-            // Create the union based on the table index
             return switch (loc.table) {
                 inline else => |tag| blk: {
                     const T = Registry.typeFromId(tag);
@@ -512,7 +538,6 @@ pub fn TreeList(comptime Types: type) type {
             const array = &self.arrays[table_idx];
             if (loc.idx >= array.len) return null;
 
-            // Create the pointer union based on the table index
             return switch (loc.table) {
                 inline else => |tag| blk: {
                     const T = Registry.typeFromId(tag);
