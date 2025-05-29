@@ -42,6 +42,18 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    // Add benchmark executable
+    const benchmark_exe = b.addExecutable(.{
+        .name = "benchmark",
+        .root_source_file = b.path("src/benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Make the benchmark step only build the executable without running it
+    const benchmark_step = b.step("benchmark", "Build the benchmark executable");
+    benchmark_step.dependOn(&b.addInstallArtifact(benchmark_exe, .{}).step);
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
