@@ -216,9 +216,8 @@ pub fn TreeList(comptime Types: type) type {
                 }
 
                 pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-                    if (self.data != undefined and self.capacity > 0) {
+                    if (self.capacity > 0) {
                         allocator.free(self.data[0 .. self.capacity * self.elem_size]);
-                        self.* = .{};
                     }
                 }
 
@@ -385,7 +384,7 @@ pub fn TreeList(comptime Types: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             // Free each array
-            for (self.arrays) |*array| {
+            for (&self.arrays) |*array| {
                 array.deinit(allocator);
             }
 
