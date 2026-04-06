@@ -473,18 +473,18 @@ pub fn TreeList(comptime Types: type) type {
             parent_loc: Location(TypeEnum),
             child_loc: Location(TypeEnum),
         ) void {
-            // Get parent node
             const parent = self.getNodePtr(parent_loc).?;
+            // Set the child's parent pointer to the actual parent node
+            const child = self.getNodePtr(child_loc).?;
+            switch (child) {
+                inline else => |child_node| child_node.parent = parent_loc.toU64(),
+            }
             switch (parent) {
                 inline else => |parent_node| {
                     const parent_child_opt = parent_node.child;
                     if (parent_child_opt) |cur_child_loc| {
                         self.addSibling(Loc.fromU64(cur_child_loc), child_loc);
                     } else {
-                        const child = self.getNodePtr(child_loc).?;
-                        switch (child) {
-                            inline else => |child_node| child_node.sibling = parent_node.child,
-                        }
                         parent_node.child = child_loc.toU64();
                     }
                 },
@@ -493,16 +493,14 @@ pub fn TreeList(comptime Types: type) type {
 
         pub fn addSibling(
             self: *Self,
-            parent_loc: Location(TypeEnum),
-            sibling_loc: Location(TypeEnum),
+            first_sibling_loc: Location(TypeEnum),
+            new_sibling_loc: Location(TypeEnum),
         ) void {
-            // Get parent node
-            const sibling = self.getNodePtr(sibling_loc).?;
-            var current_loc = parent_loc;
+            // Walk the sibling chain to find the last sibling, then append.
+            // The new sibling's parent is already set by addChild.
+            var current_loc = first_sibling_loc;
             loop: while (true) {
                 const current = self.getNodePtr(current_loc).?;
-
-                //check if current node has a sibling
                 const next_sibling_opt = switch (current) {
                     inline else => |cur_node| cur_node.sibling,
                 };
@@ -511,12 +509,7 @@ pub fn TreeList(comptime Types: type) type {
                 } else {
                     switch (current) {
                         inline else => |cur_node| {
-                            cur_node.sibling = sibling_loc.toU64();
-                        },
-                    }
-                    switch (sibling) {
-                        inline else => |sibling_node| {
-                            sibling_node.parent = current_loc.toU64();
+                            cur_node.sibling = new_sibling_loc.toU64();
                         },
                     }
                     break :loop;
